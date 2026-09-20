@@ -80,7 +80,7 @@ class StructuringWorker:
                 "SELECT COALESCE(MAX(version), 0) + 1 FROM clerking_sheets WHERE session_id = ?", (str(job.session_id),)
             ).fetchone()[0]
         sheet = self.generator.generate(job.session_id, facts, version=next_version)
-        validation_findings = self.generator.validator.validate(sheet, facts)
+        validation_findings = self.generator.safety_firewall.validate_clerking_sheet(sheet, facts).findings
         now = datetime.now(timezone.utc).isoformat()
         with self.database.transaction() as connection:
             self._require_lease(connection, job)

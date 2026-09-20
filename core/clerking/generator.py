@@ -6,12 +6,14 @@ from uuid import UUID
 
 from core.clerking.validation import DoNotInferValidator
 from core.models import AssertionState, ClinicalFact
+from core.validation import HallucinationFirewall
 from models.clerking_sheet import AllergyEntry, ClerkingSheet, DrugHistoryEntry, HPCSection, NOT_DISCUSSED
 
 
 class ClerkingSheetGenerator:
-    def __init__(self, validator: DoNotInferValidator | None = None) -> None:
+    def __init__(self, validator: DoNotInferValidator | None = None, safety_firewall: HallucinationFirewall | None = None) -> None:
         self.validator = validator or DoNotInferValidator()
+        self.safety_firewall = safety_firewall or HallucinationFirewall()
 
     def generate(self, session_id: UUID | str, facts: list[ClinicalFact], *, version: int = 1) -> ClerkingSheet:
         session_uuid = UUID(str(session_id))
@@ -83,6 +85,7 @@ class ClerkingSheetGenerator:
             fact_ids=[fact.id for fact in facts], evidence_by_field=dict(evidence),
         )
         self.validator.validate(sheet, facts)
+        self.safety_firewall.validate_clerking_sheet(sheet, facts)
         return sheet
 
     @staticmethod

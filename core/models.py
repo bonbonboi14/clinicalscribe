@@ -154,6 +154,11 @@ class ClinicalFact(ImmutableModel):
     transcript_segment_ids: list[UUID] = Field(default_factory=list)
     original_text: str | None = None
 
+    @property
+    def status(self) -> AssertionState:
+        """Readable alias for the mandatory assertion state."""
+        return self.assertion
+
 
 from models.examination_finding import (  # noqa: E402  (compatibility re-export)
     ExaminationFinding,
@@ -207,6 +212,32 @@ class ValidationFinding(ImmutableModel):
     state: ClaimState
     evidence_segment_ids: list[UUID] = Field(default_factory=list)
     explanation: str | None = None
+
+
+class NoteValidationResult(ImmutableModel):
+    """Claim-level result produced before a clinical artefact may be shown."""
+
+    artefact_type: str
+    artefact_id: UUID
+    findings: list[ValidationFinding] = Field(default_factory=list)
+    is_safe: bool
+
+    @model_validator(mode="after")
+    def derive_safety_from_findings(self) -> "NoteValidationResult":
+        expected = not any(
+            finding.state in {ClaimState.UNSUPPORTED, ClaimState.CONTRADICTED}
+            for finding in self.findings
+        )
+        if self.is_safe != expected:
+            raise ValueError("is_safe must reflect the per-claim classifications")
+        return self
+
+    @property
+    def blocked_findings(self) -> list[ValidationFinding]:
+        return [
+            finding for finding in self.findings
+            if finding.state in {ClaimState.UNSUPPORTED, ClaimState.CONTRADICTED}
+        ]
 
 
 class ExportRequest(ImmutableModel):

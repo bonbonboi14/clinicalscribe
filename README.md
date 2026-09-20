@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 6 adds YAML-driven English clinical notes, an opt-in local Ollama adapter, evidence validation, and three-pane clinician review.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 7 adds a claim-level safety engine that blocks unsupported and contradicted content across clerking sheets, notes, treatment plans, and optional differentials.
 
 The clinical pipeline is:
 
@@ -91,6 +91,8 @@ The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalis
 After diarization, a durable `EXAMINATION_INTERPRETATION` job maps spoken examination phrases using `config/examination_mappings/*.yaml` and records `EXAMINATION_INTERPRETATION_COMPLETE`. High-confidence mappings are confirmed automatically; low-confidence mappings and unchanged pass-through phrases require clinician review. The worker then queues `STRUCTURING`, which extracts assertion-aware `ClinicalFact` records and generates the typed Medical Clerking Sheet. No transcript text is sent directly to note generation. Each displayed value is linked to its supporting fact and checked by the DO-NOT-INFER validator; missing fields display `Not discussed.`, while absent examination documentation displays `Not performed`.
 
 After `CLERKING_SHEET_GENERATED`, the worker queues a recoverable `NOTE_GENERATION` job. Its only clinical input is the latest typed clerking sheet. The default `structured_template` engine renders English Markdown and TXT deterministically from `templates/primary_care.yaml`; `soap` and `ent` are also available. `ollama` is opt-in and requires an explicitly configured local model. Before persistence, every rendered clinical value is classified by the hallucination firewall; unsupported or contradicted output is rejected. The UI presents transcript, clerking sheet, and clinical note side by side. Clipboard and file exports remain disabled until the clinician creates an immutable approval revision.
+
+The Phase 7 safety engine lives in `core/validation/`. Every `ClinicalFact` carries an explicit `POSITIVE`, `NEGATIVE`, `NOT_MENTIONED`, or `UNCERTAIN` assertion. Artefact claims are extracted and classified as `SUPPORTED`, `UNSUPPORTED`, `CONTRADICTED`, or `UNCERTAIN`; unsafe findings prevent persistence or presentation. The same firewall API validates clerking sheets, clinical notes, transcript-traceable treatment plans, and differentials when that default-off feature is enabled.
 
 Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCRIPT`, `TRANSLATED_TRANSCRIPT`, and `SPEAKER_LABELLED_TRANSCRIPT`. The translated artefact records an English target and per-segment translation status; when optional translation is disabled, non-English source is retained with `NOT_REQUESTED` rather than being presented as English. Enable translation only with a local model directory via `multilingual.translation_enabled` and `multilingual.local_model_path`; the adapter prevents network model downloads. Install `.[translation]` only when this feature is needed.
 
