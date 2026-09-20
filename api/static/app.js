@@ -360,3 +360,91 @@ examinationFindingsEl.addEventListener("click", async event => {
     event.target.disabled = false;
   }
 });
+
+const noteSessionInput = document.querySelector("#noteSessionId");
+const noteReviewStatus = document.querySelector("#noteReviewStatus");
+const noteReviewGrid = document.querySelector("#noteReviewGrid");
+const noteTranscript = document.querySelector("#noteTranscript");
+const noteClerking = document.querySelector("#noteClerking");
+const clinicalNote = document.querySelector("#clinicalNote");
+const claimSummary = document.querySelector("#claimSummary");
+const approveNoteButton = document.querySelector("#approveNote");
+const copyNoteButton = document.querySelector("#copyNote");
+const downloadTxt = document.querySelector("#downloadTxt");
+const downloadMarkdown = document.querySelector("#downloadMarkdown");
+let currentNoteReview = null;
+noteSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
+
+function clerkingMarkup(sheet) {
+  const hidden = new Set(["id", "session_id", "version", "fact_ids", "evidence_by_field", "status", "created_at"]);
+  return Object.entries(sheet).filter(([key]) => !hidden.has(key)).map(([key, value]) =>
+    `<section class="clerking-section"><h4>${escapeHtml(labelize(key))}</h4>${renderClerkingValue(value)}</section>`
+  ).join("");
+}
+
+function renderNoteReview(review) {
+  currentNoteReview = review;
+  noteTranscript.innerHTML = review.transcript.segments.length
+    ? review.transcript.segments.map(segment => `<article class="segment"><span class="metadata">${(segment.start_ms / 1000).toFixed(1)}–${(segment.end_ms / 1000).toFixed(1)}s · ${escapeHtml(segment.source_language)}</span><p>${escapeHtml(segment.original_text)}</p></article>`).join("")
+    : `<p>${escapeHtml(review.transcript.original_text)}</p>`;
+  noteClerking.innerHTML = clerkingMarkup(review.clerking_sheet);
+  clinicalNote.textContent = review.clinical_note.content;
+  const counts = review.claim_validation.reduce((result, item) => {
+    result[item.state] = (result[item.state] || 0) + 1;
+    return result;
+  }, {});
+  claimSummary.innerHTML = `<p><strong>Hallucination firewall:</strong> ${Object.entries(counts).map(([state, count]) => `<span class="claim-${state.toLowerCase()}">${count} ${escapeHtml(state)}</span>`).join(" · ")}</p>`;
+  const approved = review.clinical_note.status === "APPROVED";
+  approveNoteButton.hidden = approved;
+  copyNoteButton.hidden = !approved;
+  downloadTxt.hidden = !approved;
+  downloadMarkdown.hidden = !approved;
+  const base = `/api/v1/sessions/${encodeURIComponent(review.session_id)}/clinical-note/export`;
+  downloadTxt.href = `${base}?format=txt`;
+  downloadMarkdown.href = `${base}?format=md`;
+  noteReviewGrid.hidden = false;
+  noteReviewStatus.textContent = approved
+    ? `Approved version ${review.clinical_note.version}. Export is enabled.`
+    : `Validated draft version ${review.clinical_note.version}. Clinician approval is required before export.`;
+}
+
+async function loadNoteReview() {
+  const sessionId = noteSessionInput.value.trim();
+  if (!sessionId) return;
+  noteReviewStatus.textContent = "Loading side-by-side review…";
+  const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/note-review`);
+  if (!response.ok) throw new Error((await response.json()).detail || `Load failed (${response.status})`);
+  renderNoteReview(await response.json());
+}
+
+document.querySelector("#loadNoteReview").addEventListener("click", () => loadNoteReview().catch(error => {
+  noteReviewStatus.textContent = `Could not load: ${error.message}`;
+}));
+
+approveNoteButton.addEventListener("click", async () => {
+  if (!currentNoteReview) return;
+  approveNoteButton.disabled = true;
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(currentNoteReview.session_id)}/clinical-note/approval`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: "local-clinician" })
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || `Approval failed (${response.status})`);
+    await loadNoteReview();
+  } catch (error) {
+    noteReviewStatus.textContent = `Could not approve: ${error.message}`;
+  } finally {
+    approveNoteButton.disabled = false;
+  }
+});
+
+copyNoteButton.addEventListener("click", async () => {
+  if (!currentNoteReview || currentNoteReview.clinical_note.status !== "APPROVED") return;
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(currentNoteReview.session_id)}/clinical-note/export?format=txt`);
+    if (!response.ok) throw new Error((await response.json()).detail || `Export failed (${response.status})`);
+    await navigator.clipboard.writeText(await response.text());
+    noteReviewStatus.textContent = "Approved note copied to the clipboard.";
+  } catch (error) {
+    noteReviewStatus.textContent = `Could not copy: ${error.message}`;
+  }
+});

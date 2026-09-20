@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 5 adds a YAML-extensible Clinical Examination Interpreter with source-preserving mappings and audited clinician confirmation.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 6 adds YAML-driven English clinical notes, an opt-in local Ollama adapter, evidence validation, and three-pane clinician review.
 
 The clinical pipeline is:
 
@@ -23,7 +23,8 @@ core/
   extraction/            Structured fact extraction
   validation/            Hallucination firewall
   clerking/              Medical Clerking Sheet generation
-  note_generation/       Swappable NoteGenerationEngine
+  templates/             YAML schema, deterministic renderer, and Ollama NoteGenerationEngine
+  note_generation/       Compatibility import for NoteGenerationEngine
   treatment/             Traceable treatment plan
   diagnosis/             Optional differential engine
   github/                Manual GitHub export boundary
@@ -87,7 +88,9 @@ When assembly completes, the API creates one durable SQLite `TRANSCRIPTION` job 
 
 The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalises it, detects language for every timestamped segment, and stores both canonical raw JSON and an immutable database row. It then queues a separate durable `DIARIZATION` job. The default `cpu-acoustic-v1` engine assigns `SPEAKER_00`/`SPEAKER_01` without guessing clinical roles. The review UI lets a clinician assign Doctor/Patient/Other, rename or merge voices, and reassign individual segments. Every correction is appended as a new revision.
 
-After diarization, a durable `EXAMINATION_INTERPRETATION` job maps spoken examination phrases using `config/examination_mappings/*.yaml` and records `EXAMINATION_INTERPRETATION_COMPLETE`. High-confidence mappings are confirmed automatically; low-confidence mappings and unchanged pass-through phrases require clinician review. The worker then queues `STRUCTURING`, which extracts assertion-aware `ClinicalFact` records and generates the typed Medical Clerking Sheet. No transcript text is sent directly to note generation. Each displayed value is linked to its supporting fact and checked by the DO-NOT-INFER validator; missing fields display `Not discussed.`, while absent examination documentation displays `Not performed`. The session enters review only after the worker records `STRUCTURE_COMPLETE` and then `CLERKING_SHEET_GENERATED`.
+After diarization, a durable `EXAMINATION_INTERPRETATION` job maps spoken examination phrases using `config/examination_mappings/*.yaml` and records `EXAMINATION_INTERPRETATION_COMPLETE`. High-confidence mappings are confirmed automatically; low-confidence mappings and unchanged pass-through phrases require clinician review. The worker then queues `STRUCTURING`, which extracts assertion-aware `ClinicalFact` records and generates the typed Medical Clerking Sheet. No transcript text is sent directly to note generation. Each displayed value is linked to its supporting fact and checked by the DO-NOT-INFER validator; missing fields display `Not discussed.`, while absent examination documentation displays `Not performed`.
+
+After `CLERKING_SHEET_GENERATED`, the worker queues a recoverable `NOTE_GENERATION` job. Its only clinical input is the latest typed clerking sheet. The default `structured_template` engine renders English Markdown and TXT deterministically from `templates/primary_care.yaml`; `soap` and `ent` are also available. `ollama` is opt-in and requires an explicitly configured local model. Before persistence, every rendered clinical value is classified by the hallucination firewall; unsupported or contradicted output is rejected. The UI presents transcript, clerking sheet, and clinical note side by side. Clipboard and file exports remain disabled until the clinician creates an immutable approval revision.
 
 Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCRIPT`, `TRANSLATED_TRANSCRIPT`, and `SPEAKER_LABELLED_TRANSCRIPT`. The translated artefact records an English target and per-segment translation status; when optional translation is disabled, non-English source is retained with `NOT_REQUESTED` rather than being presented as English. Enable translation only with a local model directory via `multilingual.translation_enabled` and `multilingual.local_model_path`; the adapter prevents network model downloads. Install `.[translation]` only when this feature is needed.
 
@@ -101,6 +104,11 @@ Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCR
 - `GET /api/v1/sessions/{id}/examination-findings` returns the effective source-preserving interpretation and review status for every detected examination phrase.
 - `POST /api/v1/sessions/{id}/examination-findings/{finding_id}/confirmation` appends an audited clinician-confirmed interpretation without changing the source finding.
 - `GET /api/v1/sessions/{id}/clerking-sheet` returns the latest typed, evidence-linked Medical Clerking Sheet for review.
+- `GET /api/v1/sessions/{id}/note-review` returns the transcript, clerking sheet, clinical note, and claim classifications for three-pane review.
+- `GET /api/v1/sessions/{id}/clinical-note` returns the latest immutable note version.
+- `POST /api/v1/sessions/{id}/clinical-note/approval` appends an approved revision; the request requires an `actor`.
+- `GET /api/v1/sessions/{id}/clinical-note/export?format=txt|md` exports only an approved note. The UI uses the TXT form for clipboard copy.
+- `GET /api/v1/sessions/note-templates/available` lists the installed YAML note templates.
 
 The server assembles only a complete contiguous sequence and never overwrites an existing chunk or assembled original. A final chunk may arrive before missing chunks; uploading those missing chunks later automatically completes assembly.
 
@@ -136,7 +144,7 @@ The `.env` file is ignored and is not required for Git itself. Token values must
 - `config/config.yaml` contains non-secret operational settings.
 - `.env.example` is a template. The real `.env` is ignored.
 - `storage/`, database files, audio formats, logs, caches, and virtual environments are ignored.
-- Runtime source artefacts use append-only/versioned rows; SQLite triggers reject update/delete operations on audio chunks, transcripts, examination findings/revisions, structured facts, and clerking sheets.
+- Runtime source artefacts use append-only/versioned rows; SQLite triggers reject update/delete operations on audio chunks, transcripts, examination findings/revisions, structured facts, clerking sheets, and notes.
 - Raw transcript JSON filenames include their content checksum; the database stores that SHA-256 for integrity verification.
 - Structured clinical facts require one of `POSITIVE`, `NEGATIVE`, `NOT_MENTIONED`, or `UNCERTAIN`.
 - Validation findings require `SUPPORTED`, `UNSUPPORTED`, `CONTRADICTED`, or `UNCERTAIN`.

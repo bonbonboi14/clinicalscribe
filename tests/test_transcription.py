@@ -236,7 +236,7 @@ def test_database_migration_retains_phase_two_provenance_columns(tmp_path: Path)
         ).fetchone()[0]
     assert "stage" in job_columns
     assert {"raw_transcript_path", "raw_checksum_sha256"} <= transcript_columns
-    assert version == "6"
+    assert version == "7"
 
 
 def test_phase_two_migration_backfills_assembled_sessions(tmp_path: Path) -> None:

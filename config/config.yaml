@@ -87,8 +87,11 @@ clerking:
   generate_before_note: true
 
 note_generation:
-  engine: local
-  local_model: null
+  engine: structured_template
+  template: primary_care
+  template_directory: templates
+  ollama_model: null
+  ollama_base_url: http://127.0.0.1:11434
   cloud_provider: null
   cloud_enabled: false
   cloud_api_key_env: CLINICAL_SCRIBE_CLOUD_API_KEY

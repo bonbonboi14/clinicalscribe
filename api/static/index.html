@@ -62,6 +62,27 @@
       <p id="clerkingStatus" role="status">Load a processed session to review its clerking sheet.</p>
       <div id="clerkingSheet"></div>
     </section>
+    <section class="card" id="noteReviewCard">
+      <h2>Clinical Note Review</h2>
+      <p>Compare the immutable transcript, structured clerking sheet, and validated English note before approval.</p>
+      <div class="review-load">
+        <label>Session ID <input id="noteSessionId" autocomplete="off"></label>
+        <button id="loadNoteReview">Load note review</button>
+      </div>
+      <p id="noteReviewStatus" role="status">Load a processed session to review its draft note.</p>
+      <div class="note-review-grid" id="noteReviewGrid" hidden>
+        <section><h3>Transcript</h3><div id="noteTranscript" class="review-pane"></div></section>
+        <section><h3>Clerking Sheet</h3><div id="noteClerking" class="review-pane"></div></section>
+        <section><h3>Clinical Note</h3><pre id="clinicalNote" class="review-pane"></pre></section>
+      </div>
+      <div id="claimSummary"></div>
+      <div class="actions">
+        <button id="approveNote" hidden>Approve note</button>
+        <button id="copyNote" hidden>Copy approved note</button>
+        <a id="downloadTxt" class="button-link" hidden>Download TXT</a>
+        <a id="downloadMarkdown" class="button-link" hidden>Download Markdown</a>
+      </div>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

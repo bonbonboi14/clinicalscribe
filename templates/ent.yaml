@@ -1,0 +1,20 @@
+schema_version: 1
+name: ent
+display_name: ENT
+version: 1
+language: en
+title: ENT Clinical Note
+sections:
+  - heading: Presenting ENT Complaint
+    paths: [presenting_complaint]
+    style: paragraph
+  - heading: ENT History
+    paths: [history_of_presenting_complaint, systemic_review]
+  - heading: Relevant Background
+    paths: [past_medical_history, drug_history, allergies, family_history, social_history]
+  - heading: ENT Examination
+    paths: [physical_examination]
+  - heading: Investigations
+    paths: [investigations]
+  - heading: Assessment
+    paths: [assessment]

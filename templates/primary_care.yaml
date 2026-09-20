@@ -1,0 +1,33 @@
+schema_version: 1
+name: primary_care
+display_name: Primary Care
+version: 1
+language: en
+title: Primary Care Clinical Note
+sections:
+  - heading: Presenting Complaint
+    paths: [presenting_complaint]
+    style: paragraph
+  - heading: History of Presenting Complaint
+    paths: [history_of_presenting_complaint]
+    style: fields
+  - heading: Systemic Review
+    paths: [systemic_review]
+  - heading: Past Medical History
+    paths: [past_medical_history]
+  - heading: Drug History
+    paths: [drug_history]
+    style: fields
+  - heading: Allergies
+    paths: [allergies]
+    style: fields
+  - heading: Family History
+    paths: [family_history]
+  - heading: Social History
+    paths: [social_history]
+  - heading: Examination
+    paths: [physical_examination]
+  - heading: Investigations
+    paths: [investigations]
+  - heading: Assessment
+    paths: [assessment]

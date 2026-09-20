@@ -13,7 +13,7 @@ from core.models import AssertionState, ClinicalFact, JobStatus, SessionStatus
 from models.examination_finding import ExaminationFindingStatus
 from core.structuring import ClinicalFactExtractor
 from storage.database import Database
-from storage.jobs import ClaimedJob, StructuringStage, claim_structuring_job
+from storage.jobs import ClaimedJob, StructuringStage, claim_structuring_job, enqueue_note_generation_job
 
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,20 @@ class StructuringWorker:
                 (str(job.session_id), sheet_id, StructuringStage.CLERKING_SHEET_GENERATED.value, self.worker_id,
                  json.dumps({"version": sheet.version, "fact_count": len(sheet.fact_ids)}), now),
             )
+            if enqueue_note_generation_job(
+                connection, job.session_id,
+                max_attempts=int(self.settings.worker.get("max_attempts", 3)), now=now,
+            ):
+                queued_job = connection.execute(
+                    "SELECT id FROM jobs WHERE session_id = ? AND job_type = 'NOTE_GENERATION'",
+                    (str(job.session_id),),
+                ).fetchone()
+                connection.execute(
+                    "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
+                    "VALUES (?, 'job', ?, 'NOTE_GENERATION_QUEUED', ?, ?, ?)",
+                    (str(job.session_id), queued_job["id"], self.worker_id,
+                     json.dumps({"clerking_sheet_id": sheet_id}), now),
+                )
 
     def _load_segments(self, session_id: UUID) -> list[dict]:
         with self.database.connect() as connection:

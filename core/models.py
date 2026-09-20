@@ -171,9 +171,13 @@ class ClinicalNote(MutableReviewModel):
     version: int = Field(default=1, ge=1)
     language: str = "en"
     content: str
+    plain_text: str = ""
+    template_name: str = "primary_care"
+    engine: str = "structured_template"
     status: ReviewStatus = ReviewStatus.DRAFT
     approved_by: str | None = None
     approved_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class TreatmentPlan(ImmutableModel):

@@ -39,6 +39,9 @@ include = ["api*", "config*", "core*", "models*", "storage*", "worker*"]
 api = ["static/*"]
 config = ["*.yaml", "examination_mappings/*.yaml"]
 
+[tool.setuptools.data-files]
+templates = ["templates/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

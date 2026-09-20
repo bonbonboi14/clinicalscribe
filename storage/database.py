@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -224,6 +224,9 @@ CREATE TABLE IF NOT EXISTS notes (
     version INTEGER NOT NULL CHECK (version >= 1),
     language TEXT NOT NULL DEFAULT 'en',
     content TEXT NOT NULL,
+    plain_text TEXT NOT NULL DEFAULT '',
+    template_name TEXT NOT NULL DEFAULT 'primary_care',
+    engine TEXT NOT NULL DEFAULT 'structured_template',
     status TEXT NOT NULL,
     approved_by TEXT,
     approved_at TEXT,
@@ -437,6 +440,18 @@ BEGIN
     SELECT RAISE(ABORT, 'clerking sheets are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_note_update
+BEFORE UPDATE ON notes
+BEGIN
+    SELECT RAISE(ABORT, 'notes are immutable; create a new version');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_note_delete
+BEFORE DELETE ON notes
+BEGIN
+    SELECT RAISE(ABORT, 'notes are immutable');
+END;
+
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
 ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
@@ -446,6 +461,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_structuring
 ON jobs(session_id, job_type) WHERE job_type = 'STRUCTURING';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_examination_interpretation
 ON jobs(session_id, job_type) WHERE job_type = 'EXAMINATION_INTERPRETATION';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_note_generation
+ON jobs(session_id, job_type) WHERE job_type = 'NOTE_GENERATION';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
@@ -503,6 +520,7 @@ class Database:
             self._migrate_v4(connection)
             self._migrate_v5(connection)
             self._migrate_v6(connection)
+            self._migrate_v7(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -729,6 +747,41 @@ class Database:
                 "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
                 "actor, after_json, created_at) VALUES (?, 'job', ?, "
                 "'EXAMINATION_INTERPRETATION_QUEUED', 'migration-v6', '{}', ?)",
+                (row["session_id"], job_id, now),
+            )
+
+    @staticmethod
+    def _migrate_v7(connection: sqlite3.Connection) -> None:
+        """Add note render metadata and queue immutable clerking sheets for note generation."""
+        note_columns = {row["name"] for row in connection.execute("PRAGMA table_info(notes)")}
+        for name, definition in {
+            "plain_text": "TEXT NOT NULL DEFAULT ''",
+            "template_name": "TEXT NOT NULL DEFAULT 'primary_care'",
+            "engine": "TEXT NOT NULL DEFAULT 'structured_template'",
+        }.items():
+            if name not in note_columns:
+                connection.execute(f"ALTER TABLE notes ADD COLUMN {name} {definition}")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_note_generation "
+            "ON jobs(session_id, job_type) WHERE job_type = 'NOTE_GENERATION'"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        rows = connection.execute(
+            "SELECT c.session_id FROM clerking_sheets c WHERE c.version = ("
+            "SELECT MAX(c2.version) FROM clerking_sheets c2 WHERE c2.session_id = c.session_id) "
+            "AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.clerking_sheet_id = c.id) "
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = c.session_id AND j.job_type = 'NOTE_GENERATION')"
+        ).fetchall()
+        for row in rows:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, max_attempts, "
+                "available_at, created_at, updated_at) VALUES (?, ?, 'NOTE_GENERATION', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["session_id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
+                "VALUES (?, 'job', ?, 'NOTE_GENERATION_QUEUED', 'migration-v7', '{}', ?)",
                 (row["session_id"], job_id, now),
             )
 

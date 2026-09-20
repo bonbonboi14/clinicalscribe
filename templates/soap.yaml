@@ -1,0 +1,24 @@
+schema_version: 1
+name: soap
+display_name: SOAP
+version: 1
+language: en
+title: SOAP Clinical Note
+sections:
+  - heading: Subjective
+    paths:
+      - presenting_complaint
+      - history_of_presenting_complaint
+      - systemic_review
+      - past_medical_history
+      - drug_history
+      - allergies
+      - family_history
+      - social_history
+  - heading: Objective
+    paths: [physical_examination, investigations]
+  - heading: Assessment
+    paths: [assessment]
+  - heading: Plan
+    static_text: No treatment plan generated in Phase 6.
+    style: paragraph

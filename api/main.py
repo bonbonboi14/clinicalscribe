@@ -13,6 +13,7 @@ from api.sessions import router as sessions_router
 from api.speakers import router as speakers_router
 from api.clerking import router as clerking_router
 from api.examination import router as examination_router
+from api.notes import router as notes_router
 from config import load_config
 from core.logging import configure_logging
 from storage import initialize_database
@@ -44,6 +45,7 @@ app.include_router(sessions_router)
 app.include_router(speakers_router)
 app.include_router(clerking_router)
 app.include_router(examination_router)
+app.include_router(notes_router)
 
 _STATIC_DIRECTORY = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")
