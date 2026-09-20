@@ -20,6 +20,7 @@ from storage.jobs import (
     ClaimedJob,
     TranscriptionStage,
     claim_transcription_job,
+    enqueue_diarization_job,
     renew_lease,
 )
 from storage.transcripts import TranscriptFileStore
@@ -221,6 +222,18 @@ class TranscriptionWorker:
                     now,
                 ),
             )
+            if enqueue_diarization_job(
+                connection,
+                job.session_id,
+                max_attempts=int(self.settings.worker.get("max_attempts", 3)),
+                now=now,
+            ):
+                connection.execute(
+                    "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
+                    "actor, after_json, created_at) VALUES (?, 'job', NULL, "
+                    "'DIARIZATION_QUEUED', ?, '{}', ?)",
+                    (str(job.session_id), self.worker_id, now),
+                )
 
     @staticmethod
     def _primary_language(segments: Sequence[TranscriptSegment]) -> str | None:

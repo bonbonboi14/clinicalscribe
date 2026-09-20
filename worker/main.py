@@ -7,6 +7,7 @@ from config import load_config
 from core.logging import configure_logging
 from storage import initialize_database
 from worker.transcription import TranscriptionWorker
+from worker.diarization import DiarizationWorker
 
 
 def run() -> None:
@@ -21,10 +22,13 @@ def run() -> None:
     logger = logging.getLogger(__name__)
     logger.info("worker_started")
     poll_seconds = float(settings.worker.get("poll_interval_seconds", 1.0))
-    worker = TranscriptionWorker(database, settings)
+    transcription_worker = TranscriptionWorker(database, settings)
+    diarization_worker = DiarizationWorker(database, settings)
     try:
         while True:
-            if not worker.process_once():
+            processed = transcription_worker.process_once()
+            processed = diarization_worker.process_once() or processed
+            if not processed:
                 time.sleep(poll_seconds)
     except KeyboardInterrupt:
         logger.info("worker_stopped")

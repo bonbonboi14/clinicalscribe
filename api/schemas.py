@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.models import SessionStatus
+from core.models import SessionStatus, SpeakerRole, TranslationStatus
 
 
 class ApiModel(BaseModel):
@@ -59,3 +59,65 @@ class ChunkUploadResponse(UploadStatusResponse):
     checksum_sha256: str = Field(min_length=64, max_length=64)
     size_bytes: int
     already_present: bool
+
+
+class SpeakerReview(ApiModel):
+    id: UUID
+    diarization_label: str
+    display_name: str | None
+    role: SpeakerRole
+    manually_corrected: bool
+    revision: int
+
+
+class TranscriptSegmentReview(ApiModel):
+    segment_id: UUID
+    sequence_number: int
+    start_ms: int
+    end_ms: int
+    source_language: str
+    original_text: str
+    clean_text: str
+    english_text: str | None
+    translation_status: TranslationStatus
+    speaker_id: UUID
+    diarization_label: str
+    speaker_display_name: str | None
+    speaker_role: SpeakerRole
+    diarization_confidence: float
+    assignment_revision: int
+
+
+class TranscriptArtefactResponse(ApiModel):
+    kind: str
+    version: int
+    language: str | None
+    checksum_sha256: str
+
+
+class SpeakerConversationReview(ApiModel):
+    session_id: UUID
+    transcript_id: UUID
+    diarization_run_id: UUID
+    diarization_engine: str
+    speakers: list[SpeakerReview]
+    segments: list[TranscriptSegmentReview]
+    artefacts: list[TranscriptArtefactResponse]
+
+
+class SpeakerCorrection(ApiModel):
+    speaker_id: UUID
+    display_name: str | None = None
+    role: SpeakerRole
+    merge_into_speaker_id: UUID | None = None
+
+
+class SegmentSpeakerCorrection(ApiModel):
+    segment_id: UUID
+    speaker_id: UUID
+
+
+class SpeakerCorrectionsRequest(ApiModel):
+    actor: str = Field(min_length=1, max_length=200)
+    speakers: list[SpeakerCorrection] = Field(default_factory=list)
+    segment_assignments: list[SegmentSpeakerCorrection] = Field(default_factory=list)

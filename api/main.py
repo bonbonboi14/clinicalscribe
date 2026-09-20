@@ -10,10 +10,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.sessions import router as sessions_router
+from api.speakers import router as speakers_router
 from config import load_config
 from core.logging import configure_logging
 from storage import initialize_database
 from storage.files import AudioFileStore
+from storage.artefacts import TranscriptArtefactStore
 
 
 @asynccontextmanager
@@ -29,6 +31,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.database = database
     app.state.audio_file_store = AudioFileStore(settings.storage["audio_directory"])
+    app.state.transcript_artefact_store = TranscriptArtefactStore(settings.storage["artifact_directory"])
     logging.getLogger(__name__).info("application_started", extra={"version": settings.app.version})
     yield
     logging.getLogger(__name__).info("application_stopped")
@@ -36,6 +39,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Clinical Scribe", version="0.1.0", lifespan=lifespan)
 app.include_router(sessions_router)
+app.include_router(speakers_router)
 
 _STATIC_DIRECTORY = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")

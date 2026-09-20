@@ -16,6 +16,7 @@ storage/*
 !storage/files.py
 !storage/jobs.py
 !storage/transcripts.py
+!storage/artefacts.py
 *.db
 *.db-shm
 *.db-wal

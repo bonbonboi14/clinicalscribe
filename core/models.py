@@ -54,6 +54,20 @@ class ClaimState(StrEnum):
     UNCERTAIN = "UNCERTAIN"
 
 
+class SpeakerRole(StrEnum):
+    DOCTOR = "DOCTOR"
+    PATIENT = "PATIENT"
+    OTHER = "OTHER"
+    UNKNOWN = "UNKNOWN"
+
+
+class TranslationStatus(StrEnum):
+    SOURCE_ENGLISH = "SOURCE_ENGLISH"
+    TRANSLATED = "TRANSLATED"
+    NOT_REQUESTED = "NOT_REQUESTED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
 class ReviewStatus(StrEnum):
     DRAFT = "DRAFT"
     IN_REVIEW = "IN_REVIEW"
@@ -116,6 +130,17 @@ class Speaker(MutableReviewModel):
     display_name: str | None = None
     role: str | None = None
     manually_corrected: bool = False
+
+
+class SegmentLanguageMetadata(ImmutableModel):
+    segment_id: UUID
+    source_language: str
+    target_language: str = "en"
+    original_text: str
+    clean_text: str
+    translated_text: str | None = None
+    translation_status: TranslationStatus
+    confidence: float = Field(ge=0, le=1)
 
 
 class ClinicalFact(ImmutableModel):

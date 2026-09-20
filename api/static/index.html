@@ -30,6 +30,18 @@
       <p>Audio chunks stay in this browser until the PC confirms assembly. Reconnect and press Retry upload if needed.</p>
       <pre id="detail">No active session.</pre>
     </section>
+    <section class="card" id="reviewCard">
+      <h2>Speaker and language review</h2>
+      <p>Assign each detected voice to Doctor, Patient, or another role. Source-language text is always shown and never replaced.</p>
+      <div class="review-load">
+        <label>Session ID <input id="reviewSessionId" autocomplete="off"></label>
+        <button id="loadReview">Load conversation</button>
+      </div>
+      <p id="reviewStatus" role="status">Load a completed session to review it.</p>
+      <div id="speakers"></div>
+      <div id="conversation"></div>
+      <div class="actions"><button id="saveReview" hidden>Save corrections</button></div>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

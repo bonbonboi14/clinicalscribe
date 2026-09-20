@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 2 adds recoverable CPU transcription, derived-audio preprocessing, per-segment language detection, and immutable timestamped raw transcripts to the reliable recording foundation.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 3 adds recoverable CPU speaker diarization, audited Doctor/Patient assignment, per-segment language metadata, and optional local English translation without replacing source text.
 
 The clinical pipeline is:
 
@@ -17,7 +17,8 @@ core/
   audio/                 Audio processing contracts
   transcription/         Swappable TranscriptionEngine
   diarization/           Speaker assignment and correction
-  multilingual/          Source-language preservation
+  languages/             Language metadata and optional local translation
+  multilingual/          Compatibility imports for the original package name
   examination/           Clinical Examination Interpreter
   extraction/            Structured fact extraction
   validation/            Hallucination firewall
@@ -80,17 +81,21 @@ Confirm the API health endpoint:
 Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/health'
 ```
 
-Open `http://127.0.0.1:8000/` for the recording status UI. Microphone chunks are first stored in browser IndexedDB. They remain there through a network interruption and are removed only after the server reports a successfully assembled original recording.
+Open `http://127.0.0.1:8000/` for recording and speaker/language review. Microphone chunks are first stored in browser IndexedDB. They remain there through a network interruption and are removed only after the server reports a successfully assembled original recording.
 
 When assembly completes, the API creates one durable SQLite `TRANSCRIPTION` job and returns without running AI. Start `python -m worker.main` separately to process it. The default BALANCED profile uses Faster Whisper `small` on CPU with int8 compute; FAST uses `tiny`, while ACCURATE uses `medium`. The first use may download model weights into the local Faster Whisper cache.
 
-The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalises it, detects language for every timestamped segment, and stores both canonical raw JSON and an immutable database row. Original audio is never modified. Job leases are renewed during long CPU inference and expired work can be reclaimed after interruption.
+The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalises it, detects language for every timestamped segment, and stores both canonical raw JSON and an immutable database row. It then queues a separate durable `DIARIZATION` job. The default `cpu-acoustic-v1` engine assigns `SPEAKER_00`/`SPEAKER_01` without guessing clinical roles. The review UI lets a clinician assign Doctor/Patient/Other, rename or merge voices, and reassign individual segments. Every correction is appended as a new revision.
+
+Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCRIPT`, `TRANSLATED_TRANSCRIPT`, and `SPEAKER_LABELLED_TRANSCRIPT`. The translated artefact records an English target and per-segment translation status; when optional translation is disabled, non-English source is retained with `NOT_REQUESTED` rather than being presented as English. Enable translation only with a local model directory via `multilingual.translation_enabled` and `multilingual.local_model_path`; the adapter prevents network model downloads. Install `.[translation]` only when this feature is needed.
 
 ### Recording API
 
 - `POST /api/v1/sessions` creates a session. The JSON body and every patient field are optional.
 - `POST /api/v1/sessions/{id}/chunks?sequence_number=0&is_final=false` accepts raw chunk bytes. Send the lowercase or uppercase SHA-256 digest in `X-Chunk-SHA256`; retries with the same position and digest are idempotent.
 - `GET /api/v1/sessions/{id}/upload` returns received positions, known missing positions, final sequence metadata, and assembly status.
+- `GET /api/v1/sessions/{id}/speaker-review` returns the current reviewed projection with source text, optional English text, language metadata, speakers, roles, and assignment confidence.
+- `POST /api/v1/sessions/{id}/speaker-corrections` appends audited speaker role/name/merge and per-segment assignment revisions, then creates a new speaker-labelled transcript artefact.
 
 The server assembles only a complete contiguous sequence and never overwrites an existing chunk or assembled original. A final chunk may arrive before missing chunks; uploading those missing chunks later automatically completes assembly.
 

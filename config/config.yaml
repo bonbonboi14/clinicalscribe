@@ -54,15 +54,17 @@ transcription:
 
 diarization:
   enabled: true
-  engine: local
+  engine: cpu_acoustic
   min_speakers: 1
-  max_speakers: 8
+  max_speakers: 2
   manual_correction_required: true
 
 multilingual:
   preserve_original: true
   final_note_language: en
   auto_detect: true
+  translation_enabled: false
+  local_model_path: null
 
 examination:
   enabled: true

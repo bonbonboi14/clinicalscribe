@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -96,6 +96,58 @@ CREATE TABLE IF NOT EXISTS speakers (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(session_id, diarization_label)
+);
+
+CREATE TABLE IF NOT EXISTS diarization_runs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    transcript_id TEXT NOT NULL REFERENCES transcripts(id),
+    engine TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, transcript_id)
+);
+
+CREATE TABLE IF NOT EXISTS speaker_revisions (
+    id TEXT PRIMARY KEY,
+    speaker_id TEXT NOT NULL REFERENCES speakers(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    version INTEGER NOT NULL CHECK (version >= 1),
+    display_name TEXT,
+    role TEXT NOT NULL CHECK (role IN ('DOCTOR','PATIENT','OTHER','UNKNOWN')),
+    is_manual INTEGER NOT NULL CHECK (is_manual IN (0, 1)),
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    supersedes_id TEXT REFERENCES speaker_revisions(id),
+    UNIQUE(speaker_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS segment_speaker_assignments (
+    id TEXT PRIMARY KEY,
+    diarization_run_id TEXT NOT NULL REFERENCES diarization_runs(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    segment_id TEXT NOT NULL,
+    speaker_id TEXT NOT NULL REFERENCES speakers(id),
+    version INTEGER NOT NULL CHECK (version >= 1),
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    is_manual INTEGER NOT NULL CHECK (is_manual IN (0, 1)),
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    supersedes_id TEXT REFERENCES segment_speaker_assignments(id),
+    UNIQUE(segment_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS transcript_artifacts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    transcript_id TEXT NOT NULL REFERENCES transcripts(id),
+    diarization_run_id TEXT REFERENCES diarization_runs(id),
+    kind TEXT NOT NULL CHECK (kind IN ('RAW_TRANSCRIPT','CLEAN_TRANSCRIPT','TRANSLATED_TRANSCRIPT','SPEAKER_LABELLED_TRANSCRIPT')),
+    version INTEGER NOT NULL CHECK (version >= 1),
+    language TEXT,
+    storage_path TEXT NOT NULL,
+    checksum_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, kind, version)
 );
 
 CREATE TABLE IF NOT EXISTS structured_facts (
@@ -251,11 +303,76 @@ BEGIN
     SELECT RAISE(ABORT, 'transcripts are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_speaker_update
+BEFORE UPDATE ON speakers
+BEGIN
+    SELECT RAISE(ABORT, 'speakers are immutable; create a speaker revision');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_diarization_run_update
+BEFORE UPDATE ON diarization_runs
+BEGIN
+    SELECT RAISE(ABORT, 'diarization runs are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_diarization_run_delete
+BEFORE DELETE ON diarization_runs
+BEGIN
+    SELECT RAISE(ABORT, 'diarization runs are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_speaker_delete
+BEFORE DELETE ON speakers
+BEGIN
+    SELECT RAISE(ABORT, 'speakers are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_speaker_revision_update
+BEFORE UPDATE ON speaker_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'speaker revisions are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_speaker_revision_delete
+BEFORE DELETE ON speaker_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'speaker revisions are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_assignment_update
+BEFORE UPDATE ON segment_speaker_assignments
+BEGIN
+    SELECT RAISE(ABORT, 'speaker assignments are immutable; create a revision');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_assignment_delete
+BEFORE DELETE ON segment_speaker_assignments
+BEGIN
+    SELECT RAISE(ABORT, 'speaker assignments are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_transcript_artifact_update
+BEFORE UPDATE ON transcript_artifacts
+BEGIN
+    SELECT RAISE(ABORT, 'transcript artifacts are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_transcript_artifact_delete
+BEFORE DELETE ON transcript_artifacts
+BEGIN
+    SELECT RAISE(ABORT, 'transcript artifacts are immutable');
+END;
+
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
 ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_diarization
+ON jobs(session_id, job_type) WHERE job_type = 'DIARIZATION';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
+CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_assignments_segment ON segment_speaker_assignments(segment_id, version);
+CREATE INDEX IF NOT EXISTS idx_artifacts_session ON transcript_artifacts(session_id, kind, version);
 CREATE INDEX IF NOT EXISTS idx_facts_session ON structured_facts(session_id, category);
 CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_validation_artefact ON validation_findings(artefact_type, artefact_id);
@@ -303,6 +420,7 @@ class Database:
             connection.executescript(DDL)
             self._migrate_v2(connection)
             self._migrate_v3(connection)
+            self._migrate_v4(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -422,6 +540,36 @@ class Database:
                 "actor, after_json, created_at) VALUES (?, 'job', ?, "
                 "'TRANSCRIPTION_QUEUED', 'migration-v3', '{}', ?)",
                 (row["id"], job_id, now),
+            )
+
+    @staticmethod
+    def _migrate_v4(connection: sqlite3.Connection) -> None:
+        """Queue Phase 3 for completed transcripts without touching transcript rows."""
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_diarization "
+            "ON jobs(session_id, job_type) WHERE job_type = 'DIARIZATION'"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        rows = connection.execute(
+            "SELECT t.session_id FROM transcripts t "
+            "WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = t.session_id "
+            "AND j.job_type = 'DIARIZATION') "
+            "AND NOT EXISTS (SELECT 1 FROM diarization_runs d WHERE d.transcript_id = t.id) "
+            "AND t.version = (SELECT MAX(t2.version) FROM transcripts t2 WHERE t2.session_id = t.session_id)"
+        ).fetchall()
+        for row in rows:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, "
+                "max_attempts, available_at, created_at, updated_at) "
+                "VALUES (?, ?, 'DIARIZATION', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["session_id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
+                "actor, after_json, created_at) VALUES (?, 'job', ?, "
+                "'DIARIZATION_QUEUED', 'migration-v4', '{}', ?)",
+                (row["session_id"], job_id, now),
             )
 
 
