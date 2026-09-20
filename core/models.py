@@ -167,14 +167,7 @@ class ExaminationFinding(ImmutableModel):
     flagged_unmappable: bool = False
 
 
-class ClerkingSheet(MutableReviewModel):
-    id: UUID = Field(default_factory=uuid4)
-    session_id: UUID
-    version: int = Field(default=1, ge=1)
-    structured_sections: dict[str, Any]
-    fact_ids: list[UUID] = Field(default_factory=list)
-    status: ReviewStatus = ReviewStatus.DRAFT
-    created_at: datetime = Field(default_factory=utc_now)
+from models.clerking_sheet import ClerkingSheet  # noqa: E402  (compatibility re-export)
 
 
 class ClinicalNote(MutableReviewModel):

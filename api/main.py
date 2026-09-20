@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.sessions import router as sessions_router
 from api.speakers import router as speakers_router
+from api.clerking import router as clerking_router
 from config import load_config
 from core.logging import configure_logging
 from storage import initialize_database
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Clinical Scribe", version="0.1.0", lifespan=lifespan)
 app.include_router(sessions_router)
 app.include_router(speakers_router)
+app.include_router(clerking_router)
 
 _STATIC_DIRECTORY = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")

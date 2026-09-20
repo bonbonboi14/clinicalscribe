@@ -42,6 +42,16 @@
       <div id="conversation"></div>
       <div class="actions"><button id="saveReview" hidden>Save corrections</button></div>
     </section>
+    <section class="card" id="clerkingCard">
+      <h2>Medical Clerking Sheet</h2>
+      <p>Generated only from structured transcript facts. Missing information is shown explicitly.</p>
+      <div class="review-load">
+        <label>Session ID <input id="clerkingSessionId" autocomplete="off"></label>
+        <button id="loadClerking">Load clerking sheet</button>
+      </div>
+      <p id="clerkingStatus" role="status">Load a processed session to review its clerking sheet.</p>
+      <div id="clerkingSheet"></div>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

@@ -264,3 +264,41 @@ saveReviewButton.addEventListener("click", async () => {
     saveReviewButton.disabled = false;
   }
 });
+
+const clerkingSessionInput = document.querySelector("#clerkingSessionId");
+const clerkingStatus = document.querySelector("#clerkingStatus");
+const clerkingSheetEl = document.querySelector("#clerkingSheet");
+clerkingSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
+
+function labelize(value) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function renderClerkingValue(value) {
+  if (Array.isArray(value)) return `<ul>${value.map(item => `<li>${renderClerkingValue(item)}</li>`).join("")}</ul>`;
+  if (value && typeof value === "object") {
+    return `<dl>${Object.entries(value).map(([key, item]) => `<dt>${escapeHtml(labelize(key))}</dt><dd>${renderClerkingValue(item)}</dd>`).join("")}</dl>`;
+  }
+  return escapeHtml(String(value));
+}
+
+function renderClerking(sheet) {
+  const hidden = new Set(["id", "session_id", "version", "fact_ids", "evidence_by_field", "status", "created_at"]);
+  clerkingSheetEl.innerHTML = Object.entries(sheet).filter(([key]) => !hidden.has(key)).map(([key, value]) =>
+    `<section class="clerking-section"><h3>${escapeHtml(labelize(key))}</h3>${renderClerkingValue(value)}</section>`
+  ).join("");
+  clerkingStatus.textContent = `Draft version ${sheet.version}. Clinician review is required before export.`;
+}
+
+document.querySelector("#loadClerking").addEventListener("click", async () => {
+  const sessionId = clerkingSessionInput.value.trim();
+  if (!sessionId) return;
+  clerkingStatus.textContent = "Loading clerking sheet…";
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/clerking-sheet`);
+    if (!response.ok) throw new Error((await response.json()).detail || `Load failed (${response.status})`);
+    renderClerking(await response.json());
+  } catch (error) {
+    clerkingStatus.textContent = `Could not load: ${error.message}`;
+  }
+});

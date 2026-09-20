@@ -8,6 +8,7 @@ from core.logging import configure_logging
 from storage import initialize_database
 from worker.transcription import TranscriptionWorker
 from worker.diarization import DiarizationWorker
+from worker.structuring import StructuringWorker
 
 
 def run() -> None:
@@ -24,10 +25,12 @@ def run() -> None:
     poll_seconds = float(settings.worker.get("poll_interval_seconds", 1.0))
     transcription_worker = TranscriptionWorker(database, settings)
     diarization_worker = DiarizationWorker(database, settings)
+    structuring_worker = StructuringWorker(database, settings)
     try:
         while True:
             processed = transcription_worker.process_once()
             processed = diarization_worker.process_once() or processed
+            processed = structuring_worker.process_once() or processed
             if not processed:
                 time.sleep(poll_seconds)
     except KeyboardInterrupt:

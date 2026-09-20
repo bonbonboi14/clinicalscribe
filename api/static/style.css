@@ -21,6 +21,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f7f8; paddi
 .source-text { margin: .55rem 0 .25rem; }
 .english-text { margin: .25rem 0; color: #365b50; }
 .metadata { color: #687985; font-size: .82rem; }
+.clerking-section { border-top: 1px solid #d7dfe4; padding-top: .55rem; margin-top: .8rem; }
+.clerking-section h3 { margin-bottom: .35rem; }
+.clerking-section dl { display: grid; grid-template-columns: minmax(130px, .35fr) 1fr; gap: .35rem .8rem; }
+.clerking-section dt { font-weight: 650; }
+.clerking-section dd { margin: 0; }
 @media (prefers-color-scheme: dark) {
   body { background: #10171c; color: #e7edf1; }
   .card { background: #1a252d; } .subtitle { color: #aab7c0; }

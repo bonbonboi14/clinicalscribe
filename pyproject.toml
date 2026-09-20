@@ -33,7 +33,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*", "config*", "core*", "storage*", "worker*"]
+include = ["api*", "config*", "core*", "models*", "storage*", "worker*"]
 
 [tool.setuptools.package-data]
 api = ["static/*"]

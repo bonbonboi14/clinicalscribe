@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -363,11 +363,37 @@ BEGIN
     SELECT RAISE(ABORT, 'transcript artifacts are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_structured_fact_update
+BEFORE UPDATE ON structured_facts
+BEGIN
+    SELECT RAISE(ABORT, 'structured facts are immutable; create a new version');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_structured_fact_delete
+BEFORE DELETE ON structured_facts
+BEGIN
+    SELECT RAISE(ABORT, 'structured facts are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_clerking_sheet_update
+BEFORE UPDATE ON clerking_sheets
+BEGIN
+    SELECT RAISE(ABORT, 'clerking sheets are immutable; create a new version');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_clerking_sheet_delete
+BEFORE DELETE ON clerking_sheets
+BEGIN
+    SELECT RAISE(ABORT, 'clerking sheets are immutable');
+END;
+
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
 ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_diarization
 ON jobs(session_id, job_type) WHERE job_type = 'DIARIZATION';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_structuring
+ON jobs(session_id, job_type) WHERE job_type = 'STRUCTURING';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
@@ -421,6 +447,7 @@ class Database:
             self._migrate_v2(connection)
             self._migrate_v3(connection)
             self._migrate_v4(connection)
+            self._migrate_v5(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -569,6 +596,35 @@ class Database:
                 "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
                 "actor, after_json, created_at) VALUES (?, 'job', ?, "
                 "'DIARIZATION_QUEUED', 'migration-v4', '{}', ?)",
+                (row["session_id"], job_id, now),
+            )
+
+    @staticmethod
+    def _migrate_v5(connection: sqlite3.Connection) -> None:
+        """Queue Phase 4 for diarized sessions without rewriting prior artefacts."""
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_structuring "
+            "ON jobs(session_id, job_type) WHERE job_type = 'STRUCTURING'"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        rows = connection.execute(
+            "SELECT DISTINCT d.session_id FROM diarization_runs d "
+            "WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = d.session_id "
+            "AND j.job_type = 'STRUCTURING') "
+            "AND NOT EXISTS (SELECT 1 FROM clerking_sheets c WHERE c.session_id = d.session_id)"
+        ).fetchall()
+        for row in rows:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, "
+                "max_attempts, available_at, created_at, updated_at) "
+                "VALUES (?, ?, 'STRUCTURING', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["session_id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
+                "actor, after_json, created_at) VALUES (?, 'job', ?, "
+                "'STRUCTURE_QUEUED', 'migration-v5', '{}', ?)",
                 (row["session_id"], job_id, now),
             )
 
