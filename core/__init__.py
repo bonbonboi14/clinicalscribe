@@ -1,0 +1,2 @@
+"""Clinical Scribe domain package."""
+

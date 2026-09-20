@@ -1,0 +1,122 @@
+app:
+  name: Clinical Scribe
+  environment: development
+  version: 0.1.0
+  local_only: true
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  reload: false
+
+database:
+  path: storage/clinical_scribe.db
+  busy_timeout_ms: 5000
+  journal_mode: WAL
+  foreign_keys: true
+
+storage:
+  root: storage
+  audio_directory: storage/audio
+  transcript_directory: storage/transcripts
+  artifact_directory: storage/artifacts
+  preserve_originals: true
+
+audio:
+  sample_rate_hz: 16000
+  channels: 1
+  allowed_extensions: [.m4a, .wav, .mp3]
+  max_session_minutes: 480
+
+upload:
+  chunk_size_bytes: 5242880
+  resumable: true
+  checksum_algorithm: sha256
+  max_retries: 5
+
+worker:
+  poll_interval_seconds: 1.0
+  lease_seconds: 300
+  max_attempts: 3
+  concurrency: 1
+
+transcription:
+  engine: faster_whisper
+  model: small
+  device: cpu
+  compute_type: int8
+  preserve_source_language: true
+
+diarization:
+  enabled: true
+  engine: local
+  min_speakers: 1
+  max_speakers: 8
+  manual_correction_required: true
+
+multilingual:
+  preserve_original: true
+  final_note_language: en
+  auto_detect: true
+
+examination:
+  enabled: true
+  confidence_threshold: 0.80
+  require_confirmation_below_threshold: true
+  pass_through_unmappable: true
+
+extraction:
+  structured_first: true
+  assertion_states: [POSITIVE, NEGATIVE, NOT_MENTIONED, UNCERTAIN]
+  do_not_infer: true
+
+validation:
+  hallucination_firewall: true
+  claim_states: [SUPPORTED, UNSUPPORTED, CONTRADICTED, UNCERTAIN]
+  block_unsupported_export: true
+
+clerking:
+  template: default
+  generate_before_note: true
+
+note_generation:
+  engine: local
+  local_model: null
+  cloud_provider: null
+  cloud_enabled: false
+  cloud_api_key_env: CLINICAL_SCRIBE_CLOUD_API_KEY
+
+treatment:
+  transcript_traceability_required: true
+  inference_allowed: false
+
+differential:
+  enabled: false
+  disclaimer: "Decision support only. Differential diagnoses are based solely on documented facts and require clinician judgment."
+  may_modify_note: false
+
+review:
+  clinician_approval_required: true
+
+export:
+  clipboard_enabled: true
+  text_enabled: true
+  require_approved_note: true
+  output_directory: storage/exports
+
+github:
+  enabled: false
+  repository_url: "https://github.com/bonbonboi14/clinicalscribe.git"
+  remote_name: origin
+  branch: main
+  token_env: CLINICAL_SCRIBE_GITHUB_TOKEN
+  manual_push_only: true
+  approved_notes_only: true
+  include_audio: false
+
+logging:
+  level: INFO
+  format: json
+  destination: stdout
+  file: logs/clinical_scribe.jsonl
+  include_patient_data: false
