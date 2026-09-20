@@ -1,0 +1,63 @@
+version: 1
+specialty: ent
+mappings:
+  - id: ent.inferior_turbinate_hypertrophy.side
+    pattern: '^(?P<side>left|right) (?:side of (?:the )?)?nose (?:is |looks )?(?:swollen|blocked)$'
+    term: '{side} inferior turbinate hypertrophy'
+    confidence: 0.92
+  - id: ent.inferior_turbinate_hypertrophy.bilateral
+    pattern: '^nose (?:is |looks )?swollen on both sides$'
+    term: 'bilateral inferior turbinate hypertrophy'
+    confidence: 0.94
+  - id: ent.tonsillar_exudate
+    pattern: '^(?:pus in (?:the )?throat|white stuff on (?:the )?tonsils)$'
+    term: 'tonsillar exudate'
+    confidence: 0.91
+  - id: ent.tonsillar_enlargement.grade
+    pattern: '^tonsils (?:are )?(?:grade|size) (?P<grade>[1-4])(?:\+)?(?: enlarged)?$'
+    term: 'tonsillar enlargement (grade {grade})'
+    confidence: 0.95
+  - id: ent.tonsillar_enlargement
+    pattern: '^tonsils (?:are |look )?(?:big|enlarged)$'
+    term: 'tonsillar enlargement'
+    confidence: 0.91
+  - id: ent.tympanic_membranes_intact
+    pattern: '^(?:both )?eardrums (?:look |are )?(?:fine|normal|intact)$'
+    term: 'bilateral tympanic membranes intact, no perforation'
+    confidence: 0.94
+  - id: ent.acute_otitis_media.side
+    pattern: '^(?:(?P<side>left|right) (?:ear|eardrum) (?:is |looks )?red|fluid behind (?:the )?(?P<side_fluid>left|right) eardrum)$'
+    term: '{side}{side_fluid} acute otitis media'
+    confidence: 0.88
+  - id: ent.acute_otitis_media.bilateral
+    pattern: '^(?:both|bilateral) (?:ears|eardrums) (?:are |look )?red$'
+    term: 'bilateral acute otitis media'
+    confidence: 0.9
+  - id: ent.acute_otitis_media.unspecified
+    pattern: '^(?:(?:the )?(?:ear|eardrum) (?:is |looks )?red|fluid behind (?:the )?eardrum)$'
+    term: 'acute otitis media (side not specified)'
+    confidence: 0.72
+  - id: ent.otitis_media_with_effusion
+    pattern: '^fluid in (?:the )?(?:left |right |both )?ear(?:s)?$'
+    term: 'otitis media with effusion'
+    confidence: 0.84
+  - id: ent.cervical_lymphadenopathy
+    pattern: '^(?:the )?neck glands (?:are |feel |look )?swollen$'
+    term: 'cervical lymphadenopathy'
+    confidence: 0.91
+  - id: ent.pharyngeal_erythema
+    pattern: '^(?:the )?throat (?:is |looks )?(?:red|inflamed)$'
+    term: 'pharyngeal erythema'
+    confidence: 0.92
+  - id: ent.dysphonia
+    pattern: '^(?:the |his |her )?voice (?:is |sounds )?(?:hoarse|raspy)$'
+    term: 'dysphonia'
+    confidence: 0.9
+  - id: ent.nasal_polyposis
+    pattern: '^nasal polyps (?:are )?visible$'
+    term: 'nasal polyposis'
+    confidence: 0.96
+  - id: ent.otorrhoea
+    pattern: '^(?:(?P<side>left|right) )?ear (?:has |with )?(?:discharge|pus)$'
+    term: '{side} otorrhoea'
+    confidence: 0.9

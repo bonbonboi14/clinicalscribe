@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from config.settings import AppConfig
 from core.clerking import ClerkingSheetGenerator
 from core.models import AssertionState, ClinicalFact, JobStatus, SessionStatus
+from models.examination_finding import ExaminationFindingStatus
 from core.structuring import ClinicalFactExtractor
 from storage.database import Database
 from storage.jobs import ClaimedJob, StructuringStage, claim_structuring_job
@@ -49,6 +50,11 @@ class StructuringWorker:
         if not facts:
             segments = self._load_segments(job.session_id)
             facts = self.extractor.extract(segments)
+            examination_facts = self._load_examination_facts(job.session_id)
+            if examination_facts:
+                # The interpreter owns PE wording. This prevents the general
+                # extractor from bypassing review with raw examination prose.
+                facts = [fact for fact in facts if fact.category != "PE"] + examination_facts
             now = datetime.now(timezone.utc).isoformat()
             with self.database.transaction() as connection:
                 self._require_lease(connection, job)
@@ -146,6 +152,29 @@ class StructuringWorker:
             value=row["value"], assertion=AssertionState(row["assertion"]), confidence=row["confidence"],
             transcript_segment_ids=[UUID(item) for item in json.loads(row["evidence_json"])], original_text=row["original_text"],
         ) for row in rows]
+
+    def _load_examination_facts(self, session_id: UUID) -> list[ClinicalFact]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT f.*, r.interpreted_text AS revised_text, r.status AS revised_status "
+                "FROM examination_findings f LEFT JOIN examination_finding_revisions r ON r.id = ("
+                "SELECT r2.id FROM examination_finding_revisions r2 WHERE r2.finding_id = f.id "
+                "ORDER BY r2.version DESC LIMIT 1) WHERE f.session_id = ? ORDER BY f.created_at, f.id",
+                (str(session_id),),
+            ).fetchall()
+        facts = []
+        for row in rows:
+            status = ExaminationFindingStatus(row["revised_status"] or row["status"])
+            confirmed = status == ExaminationFindingStatus.CONFIRMED
+            text = (row["revised_text"] or row["interpreted_text"]) if confirmed else row["raw_text"]
+            facts.append(ClinicalFact(
+                session_id=session_id, category="PE", name=text, value=text,
+                assertion=AssertionState.POSITIVE if confirmed else AssertionState.UNCERTAIN,
+                confidence=row["confidence"],
+                transcript_segment_ids=[UUID(item) for item in json.loads(row["evidence_json"])],
+                original_text=row["raw_text"],
+            ))
+        return facts
 
     @staticmethod
     def _require_lease(connection, job: ClaimedJob) -> None:

@@ -302,3 +302,61 @@ document.querySelector("#loadClerking").addEventListener("click", async () => {
     clerkingStatus.textContent = `Could not load: ${error.message}`;
   }
 });
+
+const examinationSessionInput = document.querySelector("#examinationSessionId");
+const examinationStatus = document.querySelector("#examinationStatus");
+const examinationFindingsEl = document.querySelector("#examinationFindings");
+examinationSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
+
+function renderExaminationFindings(findings) {
+  if (!findings.length) {
+    examinationFindingsEl.innerHTML = "<p>No spoken examination findings were detected.</p>";
+    examinationStatus.textContent = "Interpretation complete; no examination narration detected.";
+    return;
+  }
+  examinationFindingsEl.innerHTML = findings.map(finding => {
+    const reviewRequired = finding.status !== "CONFIRMED";
+    return `<article class="examination-finding status-${finding.status.toLowerCase()}" data-finding-id="${finding.id}">
+      <div class="finding-heading"><strong>${escapeHtml(finding.status.replaceAll("_", " "))}</strong><span class="metadata">confidence ${(finding.confidence * 100).toFixed(0)}%</span></div>
+      <p><span class="metadata">Spoken:</span> ${escapeHtml(finding.raw_text)}</p>
+      ${reviewRequired ? `<label>Clinician interpretation<input class="finding-interpretation" value="${escapeHtml(finding.interpreted_text)}"></label>
+        <div class="actions"><button class="confirm-finding">Confirm mapping</button></div>` : `<p><span class="metadata">Clinical term:</span> ${escapeHtml(finding.interpreted_text)}</p>`}
+    </article>`;
+  }).join("");
+  const pending = findings.filter(finding => finding.status !== "CONFIRMED").length;
+  examinationStatus.textContent = pending
+    ? `${pending} finding${pending === 1 ? "" : "s"} require clinician confirmation.`
+    : "All examination mappings are confirmed.";
+}
+
+async function loadExaminationFindings() {
+  const sessionId = examinationSessionInput.value.trim();
+  if (!sessionId) return;
+  examinationStatus.textContent = "Loading examination findings…";
+  const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/examination-findings`);
+  if (!response.ok) throw new Error((await response.json()).detail || `Load failed (${response.status})`);
+  renderExaminationFindings(await response.json());
+}
+
+document.querySelector("#loadExamination").addEventListener("click", () => loadExaminationFindings().catch(error => {
+  examinationStatus.textContent = `Could not load: ${error.message}`;
+}));
+
+examinationFindingsEl.addEventListener("click", async event => {
+  if (!event.target.classList.contains("confirm-finding")) return;
+  const card = event.target.closest(".examination-finding");
+  const sessionId = examinationSessionInput.value.trim();
+  event.target.disabled = true;
+  examinationStatus.textContent = "Saving an audited clinician confirmation…";
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/examination-findings/${card.dataset.findingId}/confirmation`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ interpreted_text: card.querySelector(".finding-interpretation").value, actor: "local-clinician" })
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || `Save failed (${response.status})`);
+    renderExaminationFindings(await response.json());
+  } catch (error) {
+    examinationStatus.textContent = `Could not save: ${error.message}`;
+    event.target.disabled = false;
+  }
+});

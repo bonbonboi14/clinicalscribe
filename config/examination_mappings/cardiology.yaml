@@ -1,0 +1,27 @@
+version: 1
+specialty: cardiology
+mappings:
+  - id: cardiology.regular_pulse
+    pattern: '^(?:the )?pulse (?:is |feels )?regular$'
+    term: 'regular pulse rhythm'
+    confidence: 0.94
+  - id: cardiology.irregular_pulse
+    pattern: '^(?:the )?pulse (?:is |feels )?irregular$'
+    term: 'irregular pulse rhythm'
+    confidence: 0.94
+  - id: cardiology.normal_heart_sounds
+    pattern: '^heart sounds (?:are |sound )?(?:normal|okay|fine)$'
+    term: 'normal first and second heart sounds'
+    confidence: 0.78
+  - id: cardiology.murmur
+    pattern: '^(?:there is |i hear )?(?:a )?heart murmur$'
+    term: 'cardiac murmur present'
+    confidence: 0.85
+  - id: cardiology.no_murmur
+    pattern: '^(?:there is )?no (?:heart )?murmur$'
+    term: 'no cardiac murmur'
+    confidence: 0.96
+  - id: cardiology.clear_chest
+    pattern: '^(?:the )?chest (?:is |sounds )?clear$'
+    term: 'clear breath sounds bilaterally'
+    confidence: 0.84

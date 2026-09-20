@@ -17,7 +17,10 @@ from core.languages import LanguageProcessor, LocalTranslationEngine
 from core.models import JobStatus, SessionStatus, TranscriptSegment
 from storage.artefacts import TranscriptArtefactStore
 from storage.database import Database
-from storage.jobs import ClaimedJob, DiarizationStage, claim_diarization_job, enqueue_structuring_job, renew_lease
+from storage.jobs import (
+    ClaimedJob, DiarizationStage, claim_diarization_job,
+    enqueue_examination_interpretation_job, renew_lease,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -206,7 +209,7 @@ class DiarizationWorker:
                 "UPDATE sessions SET status = ?, updated_at = ?, version = version + 1 WHERE id = ?",
                 (SessionStatus.PROCESSING.value, now, str(job.session_id)),
             )
-            enqueue_structuring_job(
+            enqueue_examination_interpretation_job(
                 connection, job.session_id,
                 max_attempts=int(self.settings.worker.get("max_attempts", 3)), now=now,
             )

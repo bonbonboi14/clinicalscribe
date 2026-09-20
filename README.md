@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 3 adds recoverable CPU speaker diarization, audited Doctor/Patient assignment, per-segment language metadata, and optional local English translation without replacing source text.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 5 adds a YAML-extensible Clinical Examination Interpreter with source-preserving mappings and audited clinician confirmation.
 
 The clinical pipeline is:
 
@@ -87,7 +87,7 @@ When assembly completes, the API creates one durable SQLite `TRANSCRIPTION` job 
 
 The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalises it, detects language for every timestamped segment, and stores both canonical raw JSON and an immutable database row. It then queues a separate durable `DIARIZATION` job. The default `cpu-acoustic-v1` engine assigns `SPEAKER_00`/`SPEAKER_01` without guessing clinical roles. The review UI lets a clinician assign Doctor/Patient/Other, rename or merge voices, and reassign individual segments. Every correction is appended as a new revision.
 
-After diarization, a separate durable `STRUCTURING` job extracts assertion-aware `ClinicalFact` records and generates the typed Medical Clerking Sheet. No transcript text is sent directly to note generation. Each displayed value is linked to its supporting fact and checked by the DO-NOT-INFER validator; missing fields display `Not discussed.`, while absent examination documentation displays `Not performed`. The session enters review only after the worker records `STRUCTURE_COMPLETE` and then `CLERKING_SHEET_GENERATED`.
+After diarization, a durable `EXAMINATION_INTERPRETATION` job maps spoken examination phrases using `config/examination_mappings/*.yaml` and records `EXAMINATION_INTERPRETATION_COMPLETE`. High-confidence mappings are confirmed automatically; low-confidence mappings and unchanged pass-through phrases require clinician review. The worker then queues `STRUCTURING`, which extracts assertion-aware `ClinicalFact` records and generates the typed Medical Clerking Sheet. No transcript text is sent directly to note generation. Each displayed value is linked to its supporting fact and checked by the DO-NOT-INFER validator; missing fields display `Not discussed.`, while absent examination documentation displays `Not performed`. The session enters review only after the worker records `STRUCTURE_COMPLETE` and then `CLERKING_SHEET_GENERATED`.
 
 Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCRIPT`, `TRANSLATED_TRANSCRIPT`, and `SPEAKER_LABELLED_TRANSCRIPT`. The translated artefact records an English target and per-segment translation status; when optional translation is disabled, non-English source is retained with `NOT_REQUESTED` rather than being presented as English. Enable translation only with a local model directory via `multilingual.translation_enabled` and `multilingual.local_model_path`; the adapter prevents network model downloads. Install `.[translation]` only when this feature is needed.
 
@@ -98,6 +98,8 @@ Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCR
 - `GET /api/v1/sessions/{id}/upload` returns received positions, known missing positions, final sequence metadata, and assembly status.
 - `GET /api/v1/sessions/{id}/speaker-review` returns the current reviewed projection with source text, optional English text, language metadata, speakers, roles, and assignment confidence.
 - `POST /api/v1/sessions/{id}/speaker-corrections` appends audited speaker role/name/merge and per-segment assignment revisions, then creates a new speaker-labelled transcript artefact.
+- `GET /api/v1/sessions/{id}/examination-findings` returns the effective source-preserving interpretation and review status for every detected examination phrase.
+- `POST /api/v1/sessions/{id}/examination-findings/{finding_id}/confirmation` appends an audited clinician-confirmed interpretation without changing the source finding.
 - `GET /api/v1/sessions/{id}/clerking-sheet` returns the latest typed, evidence-linked Medical Clerking Sheet for review.
 
 The server assembles only a complete contiguous sequence and never overwrites an existing chunk or assembled original. A final chunk may arrive before missing chunks; uploading those missing chunks later automatically completes assembly.
@@ -134,7 +136,7 @@ The `.env` file is ignored and is not required for Git itself. Token values must
 - `config/config.yaml` contains non-secret operational settings.
 - `.env.example` is a template. The real `.env` is ignored.
 - `storage/`, database files, audio formats, logs, caches, and virtual environments are ignored.
-- Runtime source artefacts use append-only/versioned rows; SQLite triggers reject update/delete operations on audio chunks, transcripts, structured facts, and clerking sheets.
+- Runtime source artefacts use append-only/versioned rows; SQLite triggers reject update/delete operations on audio chunks, transcripts, examination findings/revisions, structured facts, and clerking sheets.
 - Raw transcript JSON filenames include their content checksum; the database stores that SHA-256 for integrity verification.
 - Structured clinical facts require one of `POSITIVE`, `NEGATIVE`, `NOT_MENTIONED`, or `UNCERTAIN`.
 - Validation findings require `SUPPORTED`, `UNSUPPORTED`, `CONTRADICTED`, or `UNCERTAIN`.

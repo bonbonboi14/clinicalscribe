@@ -37,6 +37,7 @@ include = ["api*", "config*", "core*", "models*", "storage*", "worker*"]
 
 [tool.setuptools.package-data]
 api = ["static/*"]
+config = ["*.yaml", "examination_mappings/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

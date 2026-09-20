@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -176,6 +176,32 @@ CREATE TABLE IF NOT EXISTS examination_mappings (
     flagged_unmappable INTEGER NOT NULL DEFAULT 0 CHECK (flagged_unmappable IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS examination_findings (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    raw_text TEXT NOT NULL,
+    interpreted_text TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    status TEXT NOT NULL CHECK (status IN ('CONFIRMED','PENDING_REVIEW','UNRECOGNISED')),
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    mapping_key TEXT,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS examination_finding_revisions (
+    id TEXT PRIMARY KEY,
+    finding_id TEXT NOT NULL REFERENCES examination_findings(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    version INTEGER NOT NULL CHECK (version >= 1),
+    interpreted_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('CONFIRMED','PENDING_REVIEW','UNRECOGNISED')),
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    supersedes_id TEXT REFERENCES examination_finding_revisions(id),
+    UNIQUE(finding_id, version)
 );
 
 CREATE TABLE IF NOT EXISTS clerking_sheets (
@@ -375,6 +401,30 @@ BEGIN
     SELECT RAISE(ABORT, 'structured facts are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_examination_finding_update
+BEFORE UPDATE ON examination_findings
+BEGIN
+    SELECT RAISE(ABORT, 'examination findings are immutable; create a revision');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_examination_finding_delete
+BEFORE DELETE ON examination_findings
+BEGIN
+    SELECT RAISE(ABORT, 'examination findings are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_examination_revision_update
+BEFORE UPDATE ON examination_finding_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'examination finding revisions are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_examination_revision_delete
+BEFORE DELETE ON examination_finding_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'examination finding revisions are immutable');
+END;
+
 CREATE TRIGGER IF NOT EXISTS prevent_clerking_sheet_update
 BEFORE UPDATE ON clerking_sheets
 BEGIN
@@ -394,12 +444,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_diarization
 ON jobs(session_id, job_type) WHERE job_type = 'DIARIZATION';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_structuring
 ON jobs(session_id, job_type) WHERE job_type = 'STRUCTURING';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_examination_interpretation
+ON jobs(session_id, job_type) WHERE job_type = 'EXAMINATION_INTERPRETATION';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_assignments_segment ON segment_speaker_assignments(segment_id, version);
 CREATE INDEX IF NOT EXISTS idx_artifacts_session ON transcript_artifacts(session_id, kind, version);
 CREATE INDEX IF NOT EXISTS idx_facts_session ON structured_facts(session_id, category);
+CREATE INDEX IF NOT EXISTS idx_examination_findings_session ON examination_findings(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_examination_revisions_finding ON examination_finding_revisions(finding_id, version);
 CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_validation_artefact ON validation_findings(artefact_type, artefact_id);
 """
@@ -448,6 +502,7 @@ class Database:
             self._migrate_v3(connection)
             self._migrate_v4(connection)
             self._migrate_v5(connection)
+            self._migrate_v6(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -611,6 +666,8 @@ class Database:
             "SELECT DISTINCT d.session_id FROM diarization_runs d "
             "WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = d.session_id "
             "AND j.job_type = 'STRUCTURING') "
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = d.session_id "
+            "AND j.job_type = 'EXAMINATION_INTERPRETATION') "
             "AND NOT EXISTS (SELECT 1 FROM clerking_sheets c WHERE c.session_id = d.session_id)"
         ).fetchall()
         for row in rows:
@@ -625,6 +682,53 @@ class Database:
                 "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
                 "actor, after_json, created_at) VALUES (?, 'job', ?, "
                 "'STRUCTURE_QUEUED', 'migration-v5', '{}', ?)",
+                (row["session_id"], job_id, now),
+            )
+
+    @staticmethod
+    def _migrate_v6(connection: sqlite3.Connection) -> None:
+        """Add append-only findings and place interpretation before new structuring work."""
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_examination_interpretation "
+            "ON jobs(session_id, job_type) WHERE job_type = 'EXAMINATION_INTERPRETATION'"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            "INSERT OR IGNORE INTO examination_findings(id, session_id, raw_text, interpreted_text, "
+            "confidence, status, evidence_json, mapping_key, version, created_at) "
+            "SELECT id, session_id, original_phrase, COALESCE(formal_term, original_phrase), "
+            "confidence, CASE WHEN flagged_unmappable = 1 THEN 'UNRECOGNISED' "
+            "WHEN confirmed_by_clinician = 1 OR requires_confirmation = 0 THEN 'CONFIRMED' "
+            "ELSE 'PENDING_REVIEW' END, evidence_json, NULL, 1, created_at "
+            "FROM examination_mappings"
+        )
+        # Pending Phase 4 work has not produced facts, so safely route it through
+        # interpretation first. Completed Phase 4 artefacts remain untouched.
+        connection.execute(
+            "UPDATE jobs SET job_type = 'EXAMINATION_INTERPRETATION', stage = NULL, updated_at = ? "
+            "WHERE job_type = 'STRUCTURING' AND status = 'PENDING' "
+            "AND NOT EXISTS (SELECT 1 FROM structured_facts f WHERE f.session_id = jobs.session_id) "
+            "AND NOT EXISTS (SELECT 1 FROM jobs e WHERE e.session_id = jobs.session_id "
+            "AND e.job_type = 'EXAMINATION_INTERPRETATION')",
+            (now,),
+        )
+        rows = connection.execute(
+            "SELECT DISTINCT d.session_id FROM diarization_runs d WHERE NOT EXISTS "
+            "(SELECT 1 FROM jobs j WHERE j.session_id = d.session_id "
+            "AND j.job_type = 'EXAMINATION_INTERPRETATION')"
+        ).fetchall()
+        for row in rows:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, "
+                "max_attempts, available_at, created_at, updated_at) "
+                "VALUES (?, ?, 'EXAMINATION_INTERPRETATION', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["session_id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
+                "actor, after_json, created_at) VALUES (?, 'job', ?, "
+                "'EXAMINATION_INTERPRETATION_QUEUED', 'migration-v6', '{}', ?)",
                 (row["session_id"], job_id, now),
             )
 

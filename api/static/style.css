@@ -26,9 +26,16 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f7f8; paddi
 .clerking-section dl { display: grid; grid-template-columns: minmax(130px, .35fr) 1fr; gap: .35rem .8rem; }
 .clerking-section dt { font-weight: 650; }
 .clerking-section dd { margin: 0; }
+.examination-finding { border: 1px solid #d7dfe4; border-left: 5px solid #2e7d68; border-radius: 8px; padding: .8rem; margin: .8rem 0; }
+.examination-finding.status-pending_review { border-left-color: #b57813; background: #fff8e8; }
+.examination-finding.status-unrecognised { border-left-color: #a63838; background: #fff1f1; }
+.finding-heading { display: flex; justify-content: space-between; gap: .8rem; }
+.examination-finding p { margin: .45rem 0; }
 @media (prefers-color-scheme: dark) {
   body { background: #10171c; color: #e7edf1; }
   .card { background: #1a252d; } .subtitle { color: #aab7c0; }
   pre { background: #111a20; }
   .segment { background: #111a20; }
+  .examination-finding.status-pending_review { background: #302717; }
+  .examination-finding.status-unrecognised { background: #301b1b; }
 }

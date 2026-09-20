@@ -42,6 +42,16 @@
       <div id="conversation"></div>
       <div class="actions"><button id="saveReview" hidden>Save corrections</button></div>
     </section>
+    <section class="card" id="examinationCard">
+      <h2>Clinical Examination Interpreter</h2>
+      <p>Review low-confidence and unrecognised spoken findings. The original wording is always preserved.</p>
+      <div class="review-load">
+        <label>Session ID <input id="examinationSessionId" autocomplete="off"></label>
+        <button id="loadExamination">Load findings</button>
+      </div>
+      <p id="examinationStatus" role="status">Load a processed session to review examination mappings.</p>
+      <div id="examinationFindings"></div>
+    </section>
     <section class="card" id="clerkingCard">
       <h2>Medical Clerking Sheet</h2>
       <p>Generated only from structured transcript facts. Missing information is shown explicitly.</p>

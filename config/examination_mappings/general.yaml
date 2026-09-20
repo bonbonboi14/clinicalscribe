@@ -1,0 +1,35 @@
+version: 1
+specialty: general
+mappings:
+  - id: general.pallor
+    pattern: '^(?:the )?patient (?:is |looks )?pale$'
+    term: 'pallor present'
+    confidence: 0.86
+  - id: general.no_pallor
+    pattern: '^no pallor$'
+    term: 'no pallor'
+    confidence: 0.97
+  - id: general.febrile
+    pattern: '^(?:the )?patient (?:is |feels )?(?:feverish|hot to touch)$'
+    term: 'febrile on examination'
+    confidence: 0.76
+  - id: general.afebrile
+    pattern: '^(?:the )?patient (?:is )?afebrile$'
+    term: 'afebrile'
+    confidence: 0.97
+  - id: general.peripheral_oedema
+    pattern: '^(?:there is )?(?P<side>left|right|bilateral) (?:leg |ankle )?(?:swelling|oedema|edema)$'
+    term: '{side} peripheral oedema'
+    confidence: 0.89
+  - id: general.abdomen_soft
+    pattern: '^(?:the )?abdomen (?:is |feels )?soft$'
+    term: 'abdomen soft on palpation'
+    confidence: 0.94
+  - id: general.abdominal_tenderness
+    pattern: '^(?:the )?abdomen (?:is )?tender$'
+    term: 'abdominal tenderness'
+    confidence: 0.89
+  - id: general.equal_reactive_pupils
+    pattern: '^pupils (?:are )?equal and reactive$'
+    term: 'pupils equal and reactive to light'
+    confidence: 0.95

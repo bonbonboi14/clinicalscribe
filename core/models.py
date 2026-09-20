@@ -155,16 +155,10 @@ class ClinicalFact(ImmutableModel):
     original_text: str | None = None
 
 
-class ExaminationFinding(ImmutableModel):
-    id: UUID = Field(default_factory=uuid4)
-    session_id: UUID
-    original_phrase: str
-    formal_term: str | None = None
-    confidence: float = Field(ge=0, le=1)
-    requires_confirmation: bool = True
-    confirmed_by_clinician: bool = False
-    transcript_segment_ids: list[UUID] = Field(default_factory=list)
-    flagged_unmappable: bool = False
+from models.examination_finding import (  # noqa: E402  (compatibility re-export)
+    ExaminationFinding,
+    ExaminationFindingStatus,
+)
 
 
 from models.clerking_sheet import ClerkingSheet  # noqa: E402  (compatibility re-export)
