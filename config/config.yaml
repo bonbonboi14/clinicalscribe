@@ -42,9 +42,14 @@ worker:
 
 transcription:
   engine: faster_whisper
-  model: small
+  profile: BALANCED
+  model: null
   device: cpu
   compute_type: int8
+  cpu_threads: 0
+  silence_threshold_dbfs: -40.0
+  silence_padding_ms: 150
+  target_peak_dbfs: -1.0
   preserve_source_language: true
 
 diarization:

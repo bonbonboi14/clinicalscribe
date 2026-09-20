@@ -20,6 +20,7 @@ from api.schemas import (
 from core.models import SessionStatus
 from storage.database import Database
 from storage.files import AudioFileStore, sha256_bytes
+from storage.jobs import enqueue_transcription_job
 
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
@@ -119,6 +120,21 @@ def _try_assemble(request: Request, session_id: UUID) -> None:
                     "assembled_at = ?, updated_at = ?, version = version + 1 WHERE id = ?",
                     (str(assembled_path), checksum, size, now, now, str(session_id)),
                 )
+                enqueued = enqueue_transcription_job(
+                    connection,
+                    session_id,
+                    max_attempts=int(
+                        request.app.state.settings.worker.get("max_attempts", 3)
+                    ),
+                    now=now,
+                )
+                if enqueued:
+                    connection.execute(
+                        "INSERT INTO audit_events(session_id, artefact_type, artefact_id, "
+                        "action, actor, after_json, created_at) VALUES (?, 'job', NULL, "
+                        "'TRANSCRIPTION_QUEUED', 'system', '{}', ?)",
+                        (str(session_id), now),
+                    )
                 connection.execute(
                     "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
                     "actor, after_json, created_at) VALUES (?, 'audio_recording', ?, "

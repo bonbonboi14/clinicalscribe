@@ -45,7 +45,7 @@ def test_session_creation_accepts_no_metadata(recording_client) -> None:
 
 
 def test_out_of_order_resume_and_server_assembly(recording_client) -> None:
-    client, _ = recording_client
+    client, tmp_path = recording_client
     created = client.post(
         "/api/v1/sessions",
         json={"patient": {"external_id": "local-42"}, "audio_content_type": "audio/webm"},
@@ -66,6 +66,12 @@ def test_out_of_order_resume_and_server_assembly(recording_client) -> None:
     assembled = Path(state["assembled_audio_path"])
     assert assembled.read_bytes() == b"first-second-third"
     assert state["assembled_checksum_sha256"] == _sha(b"first-second-third")
+    database_path = tmp_path / "clinical_scribe.db"
+    with sqlite3.connect(database_path) as connection:
+        queued = connection.execute(
+            "SELECT job_type, status FROM jobs WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    assert queued == ("TRANSCRIPTION", "PENDING")
 
 
 def test_chunk_retry_is_idempotent_and_conflicts_are_rejected(recording_client) -> None:

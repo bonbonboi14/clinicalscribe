@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 1 adds durable browser recording, checksum-verified resumable chunk uploads, SQLite upload state, and immutable server-side audio assembly to the Phase 0 foundation.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 2 adds recoverable CPU transcription, derived-audio preprocessing, per-segment language detection, and immutable timestamped raw transcripts to the reliable recording foundation.
 
 The clinical pipeline is:
 
@@ -52,7 +52,7 @@ $Python = 'C:\Users\60162\.cache\codex-runtimes\codex-primary-runtime\dependenci
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,transcription]'
 Copy-Item -LiteralPath '.env.example' -Destination '.env' -ErrorAction SilentlyContinue
 python .\scripts\init_db.py
 python -m pytest
@@ -81,6 +81,10 @@ Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/health'
 ```
 
 Open `http://127.0.0.1:8000/` for the recording status UI. Microphone chunks are first stored in browser IndexedDB. They remain there through a network interruption and are removed only after the server reports a successfully assembled original recording.
+
+When assembly completes, the API creates one durable SQLite `TRANSCRIPTION` job and returns without running AI. Start `python -m worker.main` separately to process it. The default BALANCED profile uses Faster Whisper `small` on CPU with int8 compute; FAST uses `tiny`, while ACCURATE uses `medium`. The first use may download model weights into the local Faster Whisper cache.
+
+The worker decodes a derived 16 kHz mono copy, trims edge silence, peak-normalises it, detects language for every timestamped segment, and stores both canonical raw JSON and an immutable database row. Original audio is never modified. Job leases are renewed during long CPU inference and expired work can be reclaimed after interruption.
 
 ### Recording API
 
@@ -123,6 +127,7 @@ The `.env` file is ignored and is not required for Git itself. Token values must
 - `.env.example` is a template. The real `.env` is ignored.
 - `storage/`, database files, audio formats, logs, caches, and virtual environments are ignored.
 - Runtime source artefacts use append-only/versioned rows; SQLite triggers reject update/delete operations on audio chunks and transcripts.
+- Raw transcript JSON filenames include their content checksum; the database stores that SHA-256 for integrity verification.
 - Structured clinical facts require one of `POSITIVE`, `NEGATIVE`, `NOT_MENTIONED`, or `UNCERTAIN`.
 - Validation findings require `SUPPORTED`, `UNSUPPORTED`, `CONTRADICTED`, or `UNCERTAIN`.
 

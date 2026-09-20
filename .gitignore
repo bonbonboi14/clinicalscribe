@@ -14,6 +14,8 @@ storage/*
 !storage/__init__.py
 !storage/database.py
 !storage/files.py
+!storage/jobs.py
+!storage/transcripts.py
 *.db
 *.db-shm
 *.db-wal

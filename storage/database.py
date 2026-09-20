@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+from uuid import uuid4
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     lease_owner TEXT,
     lease_expires_at TEXT,
     error TEXT,
+    stage TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -76,6 +79,8 @@ CREATE TABLE IF NOT EXISTS transcripts (
     normalized_text TEXT,
     segments_json TEXT NOT NULL DEFAULT '[]',
     engine TEXT NOT NULL,
+    raw_transcript_path TEXT,
+    raw_checksum_sha256 TEXT,
     created_at TEXT NOT NULL,
     supersedes_id TEXT REFERENCES transcripts(id),
     UNIQUE(session_id, version)
@@ -247,6 +252,8 @@ BEGIN
 END;
 
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
+ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_facts_session ON structured_facts(session_id, category);
@@ -295,6 +302,7 @@ class Database:
         with self.connect() as connection:
             connection.executescript(DDL)
             self._migrate_v2(connection)
+            self._migrate_v3(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -368,6 +376,53 @@ class Database:
                 ON audio_chunks(session_id, sequence_number);
             """
         )
+
+    @staticmethod
+    def _migrate_v3(connection: sqlite3.Connection) -> None:
+        """Add recoverable transcription stage and immutable raw-file provenance."""
+        job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
+        if "stage" not in job_columns:
+            connection.execute("ALTER TABLE jobs ADD COLUMN stage TEXT")
+
+        transcript_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(transcripts)")
+        }
+        additions = {
+            "raw_transcript_path": "TEXT",
+            "raw_checksum_sha256": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in transcript_columns:
+                connection.execute(f"ALTER TABLE transcripts ADD COLUMN {name} {definition}")
+
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription "
+            "ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION'"
+        )
+
+        # Phase 1 installations may already contain assembled recordings. Make
+        # those sessions eligible for Phase 2 without rewriting their audio.
+        now = datetime.now(timezone.utc).isoformat()
+        unqueued = connection.execute(
+            "SELECT id FROM sessions WHERE assembled_audio_path IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.session_id = sessions.id "
+            "AND jobs.job_type = 'TRANSCRIPTION') "
+            "AND NOT EXISTS (SELECT 1 FROM transcripts WHERE transcripts.session_id = sessions.id)"
+        ).fetchall()
+        for row in unqueued:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, "
+                "max_attempts, available_at, created_at, updated_at) "
+                "VALUES (?, ?, 'TRANSCRIPTION', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, "
+                "actor, after_json, created_at) VALUES (?, 'job', ?, "
+                "'TRANSCRIPTION_QUEUED', 'migration-v3', '{}', ?)",
+                (row["id"], job_id, now),
+            )
 
 
 def initialize_database(path: str | Path, **kwargs: object) -> Database:
