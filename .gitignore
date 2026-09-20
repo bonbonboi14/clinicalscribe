@@ -13,6 +13,7 @@ __pycache__/
 storage/*
 !storage/__init__.py
 !storage/database.py
+!storage/files.py
 *.db
 *.db-shm
 *.db-wal

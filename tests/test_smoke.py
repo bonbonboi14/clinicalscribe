@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import yaml
 from fastapi.testclient import TestClient
 
 from api.main import app
@@ -50,7 +51,12 @@ def test_database_initializes_all_required_tables(tmp_path: Path) -> None:
 
 
 def test_app_starts_and_health_is_ok(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("CLINICAL_SCRIBE_CONFIG", "config/config.yaml")
+    config = yaml.safe_load(Path("config/config.yaml").read_text(encoding="utf-8"))
+    config["database"]["path"] = str(tmp_path / "smoke.db")
+    config["storage"]["audio_directory"] = str(tmp_path / "audio")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    monkeypatch.setenv("CLINICAL_SCRIBE_CONFIG", str(config_path))
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200

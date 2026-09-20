@@ -25,7 +25,7 @@ storage:
 audio:
   sample_rate_hz: 16000
   channels: 1
-  allowed_extensions: [.m4a, .wav, .mp3]
+  allowed_extensions: [.m4a, .wav, .mp3, .webm, .ogg]
   max_session_minutes: 480
 
 upload:

@@ -1,6 +1,6 @@
 # Clinical Scribe
 
-Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 0 establishes a CPU-only FastAPI service, a separate worker boundary, SQLite persistence, structured JSON logging, strict typed artefacts, and safety-focused architecture decisions.
+Clinical Scribe is a local-first, multilingual clinical documentation assistant for Windows. Phase 1 adds durable browser recording, checksum-verified resumable chunk uploads, SQLite upload state, and immutable server-side audio assembly to the Phase 0 foundation.
 
 The clinical pipeline is:
 
@@ -80,6 +80,16 @@ Confirm the API health endpoint:
 Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/health'
 ```
 
+Open `http://127.0.0.1:8000/` for the recording status UI. Microphone chunks are first stored in browser IndexedDB. They remain there through a network interruption and are removed only after the server reports a successfully assembled original recording.
+
+### Recording API
+
+- `POST /api/v1/sessions` creates a session. The JSON body and every patient field are optional.
+- `POST /api/v1/sessions/{id}/chunks?sequence_number=0&is_final=false` accepts raw chunk bytes. Send the lowercase or uppercase SHA-256 digest in `X-Chunk-SHA256`; retries with the same position and digest are idempotent.
+- `GET /api/v1/sessions/{id}/upload` returns received positions, known missing positions, final sequence metadata, and assembly status.
+
+The server assembles only a complete contiguous sequence and never overwrites an existing chunk or assembled original. A final chunk may arrive before missing chunks; uploading those missing chunks later automatically completes assembly.
+
 ## Git initialization and first push
 
 First set `github.repository_url` in `config/config.yaml` to the non-secret HTTPS repository URL. Never put a token in that file or in the Git remote URL.
@@ -126,4 +136,3 @@ git status --short
 git log -1 --oneline
 git remote -v
 ```
-

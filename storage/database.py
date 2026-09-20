@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     source_language TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    original_filename TEXT,
+    audio_content_type TEXT,
+    final_sequence_number INTEGER CHECK (final_sequence_number IS NULL OR final_sequence_number >= 0),
+    assembled_audio_path TEXT,
+    assembled_checksum_sha256 TEXT,
+    assembled_size_bytes INTEGER CHECK (assembled_size_bytes IS NULL OR assembled_size_bytes >= 0),
+    assembled_at TEXT,
     version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
 );
 
@@ -41,8 +48,7 @@ CREATE TABLE IF NOT EXISTS audio_chunks (
     size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
     uploaded_at TEXT NOT NULL,
     is_final INTEGER NOT NULL DEFAULT 0 CHECK (is_final IN (0, 1)),
-    UNIQUE(session_id, sequence_number),
-    UNIQUE(session_id, checksum_sha256)
+    UNIQUE(session_id, sequence_number)
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -288,11 +294,80 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(DDL)
+            self._migrate_v2(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (str(SCHEMA_VERSION),),
             )
+
+    @staticmethod
+    def _migrate_v2(connection: sqlite3.Connection) -> None:
+        """Add resumable-upload state while preserving all existing audio rows."""
+        session_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(sessions)")
+        }
+        additions = {
+            "original_filename": "TEXT",
+            "audio_content_type": "TEXT",
+            "final_sequence_number": "INTEGER CHECK (final_sequence_number IS NULL OR final_sequence_number >= 0)",
+            "assembled_audio_path": "TEXT",
+            "assembled_checksum_sha256": "TEXT",
+            "assembled_size_bytes": "INTEGER CHECK (assembled_size_bytes IS NULL OR assembled_size_bytes >= 0)",
+            "assembled_at": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in session_columns:
+                connection.execute(f"ALTER TABLE sessions ADD COLUMN {name} {definition}")
+
+        table_sql_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'audio_chunks'"
+        ).fetchone()
+        table_sql = table_sql_row["sql"] if table_sql_row else ""
+        normalized_sql = "".join(table_sql.lower().split())
+        if "unique(session_id,checksum_sha256)" not in normalized_sql:
+            return
+
+        # A repeated byte sequence at two positions is valid audio. Phase 0's checksum
+        # uniqueness constraint prevented that, so rebuild the table without it.
+        connection.executescript(
+            """
+            DROP TRIGGER IF EXISTS prevent_audio_chunk_update;
+            DROP TRIGGER IF EXISTS prevent_audio_chunk_delete;
+            DROP INDEX IF EXISTS idx_audio_chunks_session;
+            CREATE TABLE audio_chunks_v2 (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id),
+                sequence_number INTEGER NOT NULL CHECK (sequence_number >= 0),
+                storage_path TEXT NOT NULL,
+                checksum_sha256 TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+                uploaded_at TEXT NOT NULL,
+                is_final INTEGER NOT NULL DEFAULT 0 CHECK (is_final IN (0, 1)),
+                UNIQUE(session_id, sequence_number)
+            );
+            INSERT INTO audio_chunks_v2
+                (id, session_id, sequence_number, storage_path, checksum_sha256,
+                 size_bytes, uploaded_at, is_final)
+            SELECT id, session_id, sequence_number, storage_path, checksum_sha256,
+                   size_bytes, uploaded_at, is_final
+            FROM audio_chunks;
+            DROP TABLE audio_chunks;
+            ALTER TABLE audio_chunks_v2 RENAME TO audio_chunks;
+            CREATE TRIGGER prevent_audio_chunk_update
+            BEFORE UPDATE ON audio_chunks
+            BEGIN
+                SELECT RAISE(ABORT, 'audio chunks are immutable');
+            END;
+            CREATE TRIGGER prevent_audio_chunk_delete
+            BEFORE DELETE ON audio_chunks
+            BEGIN
+                SELECT RAISE(ABORT, 'audio chunks are immutable');
+            END;
+            CREATE INDEX idx_audio_chunks_session
+                ON audio_chunks(session_id, sequence_number);
+            """
+        )
 
 
 def initialize_database(path: str | Path, **kwargs: object) -> Database:

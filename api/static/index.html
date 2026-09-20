@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clinical Scribe — Recording</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>Clinical Scribe</h1>
+    <p class="subtitle">Local-first recording and resumable upload</p>
+    <section class="card">
+      <h2>Optional patient details</h2>
+      <div class="fields">
+        <label>External ID <input id="externalId" autocomplete="off"></label>
+        <label>Name <input id="fullName" autocomplete="off"></label>
+        <label>Source language <input id="sourceLanguage" placeholder="e.g. ms, zh, en"></label>
+      </div>
+      <div class="actions">
+        <button id="start">Start recording</button>
+        <button id="stop" disabled>Stop recording</button>
+        <button id="retry">Retry upload</button>
+      </div>
+      <p id="status" role="status">Ready.</p>
+      <progress id="progress" value="0" max="1"></progress>
+    </section>
+    <section class="card">
+      <h2>Recovery</h2>
+      <p>Audio chunks stay in this browser until the PC confirms assembly. Reconnect and press Retry upload if needed.</p>
+      <pre id="detail">No active session.</pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
