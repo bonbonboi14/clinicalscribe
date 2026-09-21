@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -34,21 +34,71 @@ class DatabaseSection(StrictModel):
 
 class GitHubSection(StrictModel):
     enabled: bool = False
-    repository_url: str = ""
+    repo_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("repo_url", "repository_url"),
+    )
     remote_name: str = "origin"
     branch: str = "main"
     token_env: str = "CLINICAL_SCRIBE_GITHUB_TOKEN"
-    manual_push_only: bool = True
-    approved_notes_only: bool = True
-    include_audio: bool = False
+    auto_push: bool = False
+    push_transcripts: bool = True
+    push_audio: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("push_audio", "include_audio"),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_phase_zero_keys(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        if "repo_url" in migrated and "repository_url" in migrated:
+            if migrated["repo_url"] != migrated["repository_url"]:
+                raise ValueError("conflicting repo_url and repository_url values")
+            migrated.pop("repository_url")
+        if "push_audio" in migrated and "include_audio" in migrated:
+            if bool(migrated["push_audio"]) != bool(migrated["include_audio"]):
+                raise ValueError("conflicting push_audio and include_audio values")
+            migrated.pop("include_audio")
+        if "manual_push_only" in migrated:
+            if not bool(migrated.pop("manual_push_only")):
+                raise ValueError("GitHub manual_push_only cannot be false")
+            migrated.setdefault("auto_push", False)
+        if "approved_notes_only" in migrated and not bool(migrated.pop("approved_notes_only")):
+            raise ValueError("GitHub approved_notes_only cannot be false")
+        return migrated
 
     @model_validator(mode="after")
     def enforce_safety(self) -> "GitHubSection":
-        if not self.manual_push_only or not self.approved_notes_only or self.include_audio:
-            raise ValueError("GitHub safety controls cannot be disabled")
+        if self.auto_push:
+            raise ValueError("GitHub auto_push must remain false; pushes are manual only")
+        if self.push_audio:
+            raise ValueError("GitHub push_audio must remain false; audio is never pushed")
         if self.token_env != "CLINICAL_SCRIBE_GITHUB_TOKEN":
             raise ValueError("GitHub token must use CLINICAL_SCRIBE_GITHUB_TOKEN")
         return self
+
+    @property
+    def repository_url(self) -> str:
+        """Phase 0 compatibility alias; new code uses repo_url."""
+        return self.repo_url
+
+    @property
+    def manual_push_only(self) -> bool:
+        """Compatibility view of the enforced manual-only policy."""
+        return not self.auto_push
+
+    @property
+    def approved_notes_only(self) -> bool:
+        """Approval is an invariant of the push service and API."""
+        return True
+
+    @property
+    def include_audio(self) -> bool:
+        """Compatibility view of the enforced no-audio policy."""
+        return self.push_audio
 
 
 class DiagnosisSection(StrictModel):

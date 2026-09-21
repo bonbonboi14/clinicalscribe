@@ -109,22 +109,27 @@ Four immutable artefact streams are maintained: `RAW_TRANSCRIPT`, `CLEAN_TRANSCR
 - `GET /api/v1/sessions/{id}/note-review` returns the transcript, clerking sheet, clinical note, and claim classifications for three-pane review.
 - `GET /api/v1/sessions/{id}/clinical-note` returns the latest immutable note version.
 - `POST /api/v1/sessions/{id}/clinical-note/approval` appends an approved revision; the request requires an `actor`.
-- `GET /api/v1/sessions/{id}/clinical-note/export?format=txt|md` exports only an approved note. The UI uses the TXT form for clipboard copy.
+- `GET /api/v1/sessions/{id}/clinical-note/export?format=txt|md|docx|pdf|print|json` exports only an approved note. The UI uses TXT for clipboard copy and opens the print form in a dedicated print view.
+- `POST /api/v1/sessions/{id}/github/push` manually commits an approved session package. It rejects unapproved notes, never includes audio, and records success or failure in `audit_events`.
 - `GET /api/v1/sessions/note-templates/available` lists the installed YAML note templates.
 
 The server assembles only a complete contiguous sequence and never overwrites an existing chunk or assembled original. A final chunk may arrive before missing chunks; uploading those missing chunks later automatically completes assembly.
 
 ## Git initialization and first push
 
-First set `github.repository_url` in `config/config.yaml` to the non-secret HTTPS repository URL. Never put a token in that file or in the Git remote URL.
+For clinical-session pushes, set `github.enabled: true` and `github.repo_url` in `config/config.yaml`. Keep `github.auto_push: false`; it cannot be enabled. `github.push_transcripts` controls inclusion of raw and speaker-labelled transcript text. `github.push_audio` must remain false and is enforced again inside the pusher. Never put a token in YAML, source code, logs, or a Git remote URL.
+
+After clinician approval, use **Push approved session to GitHub** in the review UI. The token is read only from `CLINICAL_SCRIBE_GITHUB_TOKEN` for that manual request. Each commit uses `[ClinicalScribe] Session <id> - <specialty> - <YYYY-MM-DD>` and writes under `sessions/<session_id>/`.
+
+The following commands are for initializing and pushing this application's source repository, not for exporting a clinical session:
 
 ```powershell
 Set-Location -LiteralPath 'C:\ClinicalScribe'
 git init -b main
 git add --all
 git commit -m 'chore: establish Clinical Scribe foundation'
-$RepoUrl = .\.venv\Scripts\python.exe -c "from config import load_config; print(load_config().github.repository_url)"
-if ([string]::IsNullOrWhiteSpace($RepoUrl)) { throw 'Set github.repository_url in config/config.yaml before pushing.' }
+$RepoUrl = .\.venv\Scripts\python.exe -c "from config import load_config; print(load_config().github.repo_url)"
+if ([string]::IsNullOrWhiteSpace($RepoUrl)) { throw 'Set github.repo_url in config/config.yaml before pushing.' }
 git remote add origin $RepoUrl
 $Token = $env:CLINICAL_SCRIBE_GITHUB_TOKEN
 if ([string]::IsNullOrWhiteSpace($Token)) { throw 'Set CLINICAL_SCRIBE_GITHUB_TOKEN for this PowerShell session.' }

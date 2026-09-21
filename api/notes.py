@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.export import ApprovalRequiredError, ExportService
 from core.models import ClinicalNote, ReviewStatus
 from core.templates import TemplateRegistry
 from models.clerking_sheet import ClerkingSheet
@@ -64,6 +65,13 @@ def get_note_review(session_id: UUID, request: Request) -> dict:
             {"claim_text": row["claim_text"], "state": row["state"], "evidence_segment_ids": json.loads(row["evidence_json"]),
              "explanation": row["explanation"]} for row in findings
         ],
+        "github_push": {
+            "enabled": request.app.state.settings.github.enabled,
+            "available": (
+                request.app.state.settings.github.enabled
+                and note_row["status"] == ReviewStatus.APPROVED.value
+            ),
+        },
     }
 
 
@@ -125,33 +133,38 @@ def approve_clinical_note(session_id: UUID, payload: ApprovalRequest, request: R
     return _note(approved)
 
 
-@router.get("/{session_id}/clinical-note/export", response_class=PlainTextResponse)
-def export_clinical_note(session_id: UUID, request: Request, format: str = Query(pattern="^(txt|md)$")) -> PlainTextResponse:
-    with request.app.state.database.transaction() as connection:
-        row = connection.execute(
-            "SELECT * FROM notes WHERE session_id = ? AND status = 'APPROVED' ORDER BY version DESC LIMIT 1", (str(session_id),)
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=409, detail="clinician approval is required before export")
-    content = row["plain_text"] if format == "txt" else row["content"]
+@router.get("/{session_id}/clinical-note/export")
+def export_clinical_note(
+    session_id: UUID,
+    request: Request,
+    format: str = Query(pattern="^(txt|md|docx|pdf|print|json)$"),
+) -> Response:
+    service = ExportService(request.app.state.database)
+    try:
+        snapshot = service.load_approved_snapshot(session_id)
+    except ApprovalRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    rendered = service.render(snapshot, format)
     now = datetime.now(timezone.utc).isoformat()
     export_id = str(uuid4())
-    checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    checksum = hashlib.sha256(rendered.content).hexdigest()
     with request.app.state.database.transaction() as connection:
         connection.execute(
             "INSERT INTO exports(id, session_id, note_id, format, destination, status, requested_by, requested_at, completed_at, checksum_sha256) "
             "VALUES (?, ?, ?, ?, 'local', 'COMPLETED', 'local-clinician', ?, ?, ?)",
-            (export_id, str(session_id), row["id"], format.upper(), now, now, checksum),
+            (export_id, str(session_id), snapshot.note["id"], format.upper(), now, now, checksum),
         )
         connection.execute(
             "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
             "VALUES (?, 'export', ?, 'NOTE_EXPORTED', 'local-clinician', ?, ?)",
-            (str(session_id), export_id, json.dumps({"note_id": row["id"], "format": format, "checksum_sha256": checksum}), now),
+            (str(session_id), export_id, json.dumps({"note_id": snapshot.note["id"], "format": format, "checksum_sha256": checksum}), now),
         )
-    media_type = "text/plain" if format == "txt" else "text/markdown"
-    return PlainTextResponse(content, media_type=media_type, headers={
-        "Content-Disposition": f'attachment; filename="clinical-note-{session_id}.{format}"'
-    })
+    disposition = "inline" if format == "print" else "attachment"
+    return Response(
+        rendered.content,
+        media_type=rendered.media_type,
+        headers={"Content-Disposition": f'{disposition}; filename="{rendered.filename}"'},
+    )
 
 
 @router.get("/note-templates/available")

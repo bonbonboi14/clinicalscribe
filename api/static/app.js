@@ -372,6 +372,11 @@ const approveNoteButton = document.querySelector("#approveNote");
 const copyNoteButton = document.querySelector("#copyNote");
 const downloadTxt = document.querySelector("#downloadTxt");
 const downloadMarkdown = document.querySelector("#downloadMarkdown");
+const downloadDocx = document.querySelector("#downloadDocx");
+const downloadPdf = document.querySelector("#downloadPdf");
+const downloadJson = document.querySelector("#downloadJson");
+const printNoteButton = document.querySelector("#printNote");
+const pushGitHubButton = document.querySelector("#pushGitHub");
 let currentNoteReview = null;
 noteSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
 
@@ -399,9 +404,17 @@ function renderNoteReview(review) {
   copyNoteButton.hidden = !approved;
   downloadTxt.hidden = !approved;
   downloadMarkdown.hidden = !approved;
+  downloadDocx.hidden = !approved;
+  downloadPdf.hidden = !approved;
+  downloadJson.hidden = !approved;
+  printNoteButton.hidden = !approved;
+  pushGitHubButton.hidden = !(approved && review.github_push.available);
   const base = `/api/v1/sessions/${encodeURIComponent(review.session_id)}/clinical-note/export`;
   downloadTxt.href = `${base}?format=txt`;
   downloadMarkdown.href = `${base}?format=md`;
+  downloadDocx.href = `${base}?format=docx`;
+  downloadPdf.href = `${base}?format=pdf`;
+  downloadJson.href = `${base}?format=json`;
   noteReviewGrid.hidden = false;
   noteReviewStatus.textContent = approved
     ? `Approved version ${review.clinical_note.version}. Export is enabled.`
@@ -446,6 +459,30 @@ copyNoteButton.addEventListener("click", async () => {
     noteReviewStatus.textContent = "Approved note copied to the clipboard.";
   } catch (error) {
     noteReviewStatus.textContent = `Could not copy: ${error.message}`;
+  }
+});
+
+printNoteButton.addEventListener("click", () => {
+  if (!currentNoteReview || currentNoteReview.clinical_note.status !== "APPROVED") return;
+  const sessionId = encodeURIComponent(currentNoteReview.session_id);
+  window.open(`/api/v1/sessions/${sessionId}/clinical-note/export?format=print`, "_blank", "noopener");
+});
+
+pushGitHubButton.addEventListener("click", async () => {
+  if (!currentNoteReview || currentNoteReview.clinical_note.status !== "APPROVED") return;
+  pushGitHubButton.disabled = true;
+  noteReviewStatus.textContent = "Pushing the approved session to GitHub…";
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(currentNoteReview.session_id)}/github/push`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actor: "local-clinician" })
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || `GitHub push failed (${response.status})`);
+    const result = await response.json();
+    noteReviewStatus.textContent = `Approved session pushed to ${result.branch} at commit ${result.commit.slice(0, 12)}.`;
+  } catch (error) {
+    noteReviewStatus.textContent = `GitHub push failed: ${error.message}`;
+  } finally {
+    pushGitHubButton.disabled = false;
   }
 });
 
