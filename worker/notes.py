@@ -12,7 +12,9 @@ from core.models import AssertionState, ClinicalFact, JobStatus, SessionStatus
 from core.templates import NoteHallucinationFirewall, OllamaEngine, TemplateNoteEngine, TemplateRegistry
 from models.clerking_sheet import ClerkingSheet
 from storage.database import Database
-from storage.jobs import ClaimedJob, NoteGenerationStage, claim_note_generation_job
+from storage.jobs import (
+    ClaimedJob, NoteGenerationStage, claim_note_generation_job, enqueue_treatment_plan_job,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -106,6 +108,20 @@ class NoteGenerationWorker:
                  json.dumps({"version": note.version, "template": note.template_name, "engine": note.engine,
                              "claim_states": sorted({item.state.value for item in findings})}), now),
             )
+            if enqueue_treatment_plan_job(
+                connection, job.session_id,
+                max_attempts=int(self.settings.worker.get("max_attempts", 3)), now=now,
+            ):
+                queued = connection.execute(
+                    "SELECT id FROM jobs WHERE session_id = ? AND job_type = 'TREATMENT_PLAN'",
+                    (str(job.session_id),),
+                ).fetchone()
+                connection.execute(
+                    "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
+                    "VALUES (?, 'job', ?, 'TREATMENT_PLAN_QUEUED', ?, ?, ?)",
+                    (str(job.session_id), queued["id"], self.worker_id,
+                     json.dumps({"note_id": str(note.id)}), now),
+                )
 
     @staticmethod
     def _require_lease(connection, job: ClaimedJob) -> None:

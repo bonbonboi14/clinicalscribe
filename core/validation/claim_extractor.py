@@ -67,7 +67,14 @@ class ClaimExtractor:
         ]
 
     def from_treatment_plan(self, plan: TreatmentPlan) -> list[ExtractedClaim]:
-        return [ExtractedClaim(item, f"items.{index}") for index, item in enumerate(plan.items)]
+        excluded = {
+            "id", "session_id", "note_id", "version", "fact_ids", "evidence_by_field",
+            "status", "created_at", "disclaimer", "source_transcript_ref",
+        }
+        claims = []
+        for path, value in self._leaf_strings(plan.model_dump(mode="python"), excluded=excluded):
+            claims.append(ExtractedClaim(value, path, tuple(plan.evidence_by_field.get(path, []))))
+        return claims
 
     def from_differential(self, differential: Differential) -> list[ExtractedClaim]:
         claims: list[ExtractedClaim] = []
@@ -81,15 +88,16 @@ class ClaimExtractor:
         return claims
 
     @staticmethod
-    def _leaf_strings(value: Any, path: str = ""):
-        excluded = {"id", "session_id", "version", "fact_ids", "evidence_by_field", "status", "created_at"}
+    def _leaf_strings(value: Any, path: str = "", *, excluded: set[str] | None = None):
+        excluded = excluded or {"id", "session_id", "version", "fact_ids", "evidence_by_field", "status", "created_at"}
         if isinstance(value, str):
             yield path, value
         elif isinstance(value, list):
             for index, item in enumerate(value):
-                yield from ClaimExtractor._leaf_strings(item, f"{path}.{index}")
+                yield from ClaimExtractor._leaf_strings(item, f"{path}.{index}", excluded=excluded)
         elif isinstance(value, dict):
             for key, item in value.items():
                 if not path and key in excluded:
                     continue
-                yield from ClaimExtractor._leaf_strings(item, f"{path}.{key}" if path else key)
+                if key not in excluded:
+                    yield from ClaimExtractor._leaf_strings(item, f"{path}.{key}" if path else key, excluded=excluded)

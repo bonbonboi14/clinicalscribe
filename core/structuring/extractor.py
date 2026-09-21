@@ -36,6 +36,11 @@ class ClinicalFactExtractor:
         r"losartan|atorvastatin|omeprazole|insulin|warfarin|amoxicillin)\b",
         re.I,
     )
+    _TREATMENT_DRUG = re.compile(
+        r"\b(paracetamol|acetaminophen|ibuprofen|aspirin|metformin|amlodipine|"
+        r"losartan|atorvastatin|omeprazole|insulin|warfarin|amoxicillin)\b",
+        re.I,
+    )
     _SYMPTOM = re.compile(
         r"\b(chest pain|abdominal pain|headache|fever|cough|shortness of breath|"
         r"breathlessness|vomiting|nausea|diarrh(?:ea|oea)|dizziness|palpitations|"
@@ -66,7 +71,10 @@ class ClinicalFactExtractor:
             )
             for sentence in self._sentences(source):
                 utterance = _Utterance(segment_id=segment_id, text=sentence)
-                for fact in self._extract_utterance(utterance, self._session_id(raw)):
+                for fact in self._extract_utterance(
+                    utterance, self._session_id(raw),
+                    treatment_allowed=self._treatment_allowed_for_speaker(raw),
+                ):
                     key = (fact.category, fact.name.casefold(), (fact.value or "").casefold(), fact.assertion.value)
                     if key not in seen:
                         seen.add(key)
@@ -98,10 +106,21 @@ class ClinicalFactExtractor:
             transcript_segment_ids=[utterance.segment_id], original_text=utterance.text,
         )
 
-    def _extract_utterance(self, utterance: _Utterance, session_id: UUID) -> list[ClinicalFact]:
+    @staticmethod
+    def _treatment_allowed_for_speaker(raw: TranscriptSegment | dict[str, Any]) -> bool:
+        if isinstance(raw, TranscriptSegment):
+            return True
+        role = raw.get("speaker_role") or raw.get("role")
+        return role is None or str(role).upper() in {"DOCTOR", "UNKNOWN"}
+
+    def _extract_utterance(
+        self, utterance: _Utterance, session_id: UUID, *, treatment_allowed: bool = True,
+    ) -> list[ClinicalFact]:
         text = utterance.text
         lower = text.casefold()
-        facts: list[ClinicalFact] = []
+        facts: list[ClinicalFact] = (
+            self._extract_explicit_treatment(utterance, session_id) if treatment_allowed else []
+        )
 
         for condition in self._PMH.findall(text):
             facts.append(self._fact(utterance, session_id, "PMH", condition, assertion=self._assertion(text)))
@@ -158,6 +177,65 @@ class ClinicalFactExtractor:
             facts.append(self._fact(utterance, session_id, "PE", "examination performed", assertion=AssertionState.NEGATIVE))
         elif re.search(r"\b(?:on examination|physical examination|exam(?:ination)? showed|blood pressure|pulse|temperature)\b", text, re.I):
             facts.append(self._fact(utterance, session_id, "PE", text))
+        return facts
+
+    def _extract_explicit_treatment(self, utterance: _Utterance, session_id: UUID) -> list[ClinicalFact]:
+        """Extract only explicit management language; diagnoses are never consulted."""
+        text = utterance.text
+        facts: list[ClinicalFact] = []
+
+        medication_action = re.search(
+            r"\b(?:give|start|prescribe|administer|commence|continue)\b", text, re.I
+        )
+        drug = self._TREATMENT_DRUG.search(text)
+        if medication_action and drug and self._assertion(text) != AssertionState.NEGATIVE:
+            payload = {
+                "section": "pharmacological",
+                "drug": drug.group(1),
+                "dose": self._match(text, r"\b\d+(?:\.\d+)?\s*(?:micrograms?|mcg|milligrams?|mg|grams?|g|ml)\b"),
+                "route": self._match(text, r"\b(?:oral(?:ly)?|by mouth|intravenous(?:ly)?|iv|intramuscular(?:ly)?|im|subcutaneous(?:ly)?|topical(?:ly)?|inhaled|rectal(?:ly)?)\b"),
+                "frequency": self._match(text, r"\b(?:once|twice|three times|four times)\s+(?:a|per)\s+day\b|\b(?:daily|nightly|weekly|bd|tds|qds|od)\b"),
+                "duration": self._match(text, r"\bfor\s+(?:about\s+)?\d+\s+(?:hour|day|week|month|year)s?\b"),
+            }
+            facts.append(self._fact(
+                utterance, session_id, "TREATMENT", "pharmacological",
+                value=json.dumps(payload), assertion=AssertionState.POSITIVE,
+            ))
+
+        rules = (
+            ("PLAN", "referrals", r"\b(?:refer|referral)\s+(?:the patient\s+)?(?:to\s+)?([^.,;]+)"),
+            ("PLAN", "investigations_ordered", r"\b(?:order|request|arrange)\s+([^.,;]+)"),
+            ("PLAN", "follow_up", r"\b(?:follow[ -]?up|review)\s+(?:the patient\s+)?(?:in|after|at)?\s*([^.,;]+)"),
+            ("PLAN", "patient_education", r"\b(?:educate|counsel|explain to)\s+(?:the patient\s+)?(?:about\s+)?([^.,;]+)"),
+            ("PLAN", "pending_decisions", r"\b(?:consider|decision pending|await results before)\s+([^.,;]+)"),
+        )
+        for category, section, pattern in rules:
+            match = re.search(pattern, text, re.I)
+            if not match:
+                continue
+            value = match.group(1).strip()
+            if value:
+                facts.append(self._fact(
+                    utterance, session_id, category, section,
+                    value=json.dumps({"section": section, "text": value}),
+                    assertion=AssertionState.POSITIVE,
+                ))
+
+        if re.search(r"\b(?:no|not starting|hold off on)\s+(?:new\s+)?medications?\s+(?:yet|for now)\b", text, re.I):
+            facts.append(self._fact(
+                utterance, session_id, "PLAN", "pending_decisions",
+                value=json.dumps({"section": "pending_decisions", "text": text.rstrip(".")}),
+                assertion=AssertionState.NEGATIVE,
+            ))
+
+        advice = re.search(r"\b(?:advise|recommend)\s+([^.,;]+)", text, re.I)
+        if advice and not drug and not re.search(r"\b(?:test|scan|x-ray|referral|refer)\b", advice.group(1), re.I):
+            value = advice.group(1).strip()
+            facts.append(self._fact(
+                utterance, session_id, "TREATMENT", "non_pharmacological",
+                value=json.dumps({"section": "non_pharmacological", "text": value}),
+                assertion=AssertionState.POSITIVE,
+            ))
         return facts
 
     @staticmethod

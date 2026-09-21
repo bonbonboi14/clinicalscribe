@@ -83,6 +83,20 @@
         <a id="downloadMarkdown" class="button-link" hidden>Download Markdown</a>
       </div>
     </section>
+    <section class="card" id="treatmentReviewCard">
+      <h2>Treatment Plan Review</h2>
+      <p>Compare transcript evidence with the generated treatment plan. No treatment is inferred from a diagnosis.</p>
+      <div class="review-load">
+        <label>Session ID <input id="treatmentSessionId" autocomplete="off"></label>
+        <button id="loadTreatmentReview">Load treatment plan</button>
+      </div>
+      <p id="treatmentReviewStatus" role="status">Load a processed session to review its treatment plan.</p>
+      <div class="treatment-review-grid" id="treatmentReviewGrid" hidden>
+        <section><h3>TRANSCRIPT</h3><div id="treatmentTranscript" class="review-pane"></div></section>
+        <section><h3>TREATMENT PLAN</h3><pre id="treatmentPlan" class="review-pane"></pre></section>
+      </div>
+      <div id="treatmentClaimSummary"></div>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

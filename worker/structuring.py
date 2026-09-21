@@ -144,16 +144,29 @@ class StructuringWorker:
                 "SELECT storage_path FROM transcript_artifacts WHERE session_id = ? AND kind = 'TRANSLATED_TRANSCRIPT' ORDER BY version DESC LIMIT 1",
                 (str(session_id),),
             ).fetchone()
+            role_rows = connection.execute(
+                "SELECT a.segment_id, r.role FROM segment_speaker_assignments a "
+                "JOIN speakers s ON s.id = a.speaker_id "
+                "JOIN speaker_revisions r ON r.speaker_id = s.id "
+                "WHERE a.session_id = ? "
+                "AND a.version = (SELECT MAX(a2.version) FROM segment_speaker_assignments a2 WHERE a2.segment_id = a.segment_id) "
+                "AND r.version = (SELECT MAX(r2.version) FROM speaker_revisions r2 WHERE r2.speaker_id = s.id)",
+                (str(session_id),),
+            ).fetchall()
         if transcript is None:
             raise ValueError("session has no transcript")
         language = {}
+        speaker_roles = {row["segment_id"]: row["role"] for row in role_rows}
         if translated:
             payload = json.loads(Path(translated["storage_path"]).read_text(encoding="utf-8"))
             language = {str(item["segment_id"]): item for item in payload["segments"]}
         result = []
         for item in json.loads(transcript["segments_json"]):
             metadata = language.get(str(item["id"]), {})
-            result.append({**item, "segment_id": item["id"], "session_id": str(session_id), **metadata})
+            result.append({
+                **item, "segment_id": item["id"], "session_id": str(session_id),
+                "speaker_role": speaker_roles.get(str(item["id"])), **metadata,
+            })
         return result
 
     def _load_facts(self, session_id: UUID) -> list[ClinicalFact]:

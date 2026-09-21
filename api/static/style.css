@@ -33,13 +33,16 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f7f8; paddi
 .finding-heading { display: flex; justify-content: space-between; gap: .8rem; }
 .examination-finding p { margin: .45rem 0; }
 .note-review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .9rem; margin-top: 1rem; }
+.treatment-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin-top: 1rem; }
+.treatment-review-grid > section { min-width: 0; border: 1px solid #d7dfe4; border-radius: 8px; padding: .75rem; }
+.treatment-review-grid h3 { margin-top: 0; }
 .note-review-grid > section { min-width: 0; border: 1px solid #d7dfe4; border-radius: 8px; padding: .75rem; }
 .note-review-grid h3 { margin-top: 0; }
 .review-pane { max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: .9rem; }
 .review-pane .clerking-section:first-child { border-top: 0; margin-top: 0; }
 .claim-supported { color: #28725e; }
 .claim-uncertain { color: #9a6815; }
-@media (max-width: 980px) { .note-review-grid { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .note-review-grid, .treatment-review-grid { grid-template-columns: 1fr; } }
 @media (prefers-color-scheme: dark) {
   body { background: #10171c; color: #e7edf1; }
   .card { background: #1a252d; } .subtitle { color: #aab7c0; }

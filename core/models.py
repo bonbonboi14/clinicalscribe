@@ -185,13 +185,10 @@ class ClinicalNote(MutableReviewModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
-class TreatmentPlan(ImmutableModel):
-    id: UUID = Field(default_factory=uuid4)
-    session_id: UUID
-    note_id: UUID | None = None
-    items: list[str] = Field(default_factory=list)
-    transcript_segment_ids: list[UUID] = Field(default_factory=list)
-    disclaimer: str = "Contains only treatment explicitly documented in the transcript."
+from models.treatment_plan import (  # noqa: E402  (compatibility re-export)
+    PharmacologicalTreatment,
+    TreatmentPlan,
+)
 
 
 class Differential(ImmutableModel):

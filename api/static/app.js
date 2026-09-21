@@ -448,3 +448,35 @@ copyNoteButton.addEventListener("click", async () => {
     noteReviewStatus.textContent = `Could not copy: ${error.message}`;
   }
 });
+
+const treatmentSessionInput = document.querySelector("#treatmentSessionId");
+const treatmentReviewStatus = document.querySelector("#treatmentReviewStatus");
+const treatmentReviewGrid = document.querySelector("#treatmentReviewGrid");
+const treatmentTranscript = document.querySelector("#treatmentTranscript");
+const treatmentPlan = document.querySelector("#treatmentPlan");
+const treatmentClaimSummary = document.querySelector("#treatmentClaimSummary");
+treatmentSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
+
+document.querySelector("#loadTreatmentReview").addEventListener("click", async () => {
+  const sessionId = treatmentSessionInput.value.trim();
+  if (!sessionId) return;
+  treatmentReviewStatus.textContent = "Loading transcript and treatment plan…";
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/treatment-review`);
+    if (!response.ok) throw new Error((await response.json()).detail || `Load failed (${response.status})`);
+    const review = await response.json();
+    treatmentTranscript.innerHTML = review.transcript.segments.length
+      ? review.transcript.segments.map(segment => `<article class="segment"><span class="metadata">${(segment.start_ms / 1000).toFixed(1)}–${(segment.end_ms / 1000).toFixed(1)}s</span><p>${escapeHtml(segment.original_text)}</p></article>`).join("")
+      : `<p>${escapeHtml(review.transcript.original_text)}</p>`;
+    treatmentPlan.textContent = review.rendered_treatment_plan;
+    const counts = review.claim_validation.reduce((result, item) => {
+      result[item.state] = (result[item.state] || 0) + 1;
+      return result;
+    }, {});
+    treatmentClaimSummary.innerHTML = `<p><strong>Hallucination firewall:</strong> ${Object.entries(counts).map(([state, count]) => `${count} ${escapeHtml(state)}`).join(" · ") || "No clinical claims; all fields not mentioned."}</p>`;
+    treatmentReviewGrid.hidden = false;
+    treatmentReviewStatus.textContent = `Draft version ${review.treatment_plan.version}. Clinician review is mandatory.`;
+  } catch (error) {
+    treatmentReviewStatus.textContent = `Could not load: ${error.message}`;
+  }
+});

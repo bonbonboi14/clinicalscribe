@@ -7,6 +7,7 @@ from uuid import UUID
 
 from core.models import AssertionState, ClaimState, ClinicalFact
 from models.clerking_sheet import NOT_DISCUSSED, NOT_PERFORMED
+from models.treatment_plan import NOT_MENTIONED
 
 
 class ContradictionChecker:
@@ -34,7 +35,7 @@ class ContradictionChecker:
         facts = list(facts)
         claim = self._normalise(claim_text)
         evidence_ids = set(evidence_fact_ids)
-        if claim_text in {NOT_DISCUSSED, NOT_PERFORMED}:
+        if claim_text in {NOT_DISCUSSED, NOT_PERFORMED, NOT_MENTIONED}:
             return ClaimState.SUPPORTED, [], "Explicit missing-information placeholder."
 
         if self._NORMAL_EXAM.search(claim_text) and any(

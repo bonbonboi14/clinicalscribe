@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -242,6 +242,9 @@ CREATE TABLE IF NOT EXISTS treatment_plans (
     version INTEGER NOT NULL DEFAULT 1,
     items_json TEXT NOT NULL DEFAULT '[]',
     evidence_json TEXT NOT NULL DEFAULT '[]',
+    structured_json TEXT NOT NULL DEFAULT '{}',
+    fact_ids_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'DRAFT',
     created_at TEXT NOT NULL,
     supersedes_id TEXT REFERENCES treatment_plans(id),
     UNIQUE(session_id, version)
@@ -452,6 +455,18 @@ BEGIN
     SELECT RAISE(ABORT, 'notes are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_treatment_plan_update
+BEFORE UPDATE ON treatment_plans
+BEGIN
+    SELECT RAISE(ABORT, 'treatment plans are immutable; create a new version');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_treatment_plan_delete
+BEFORE DELETE ON treatment_plans
+BEGIN
+    SELECT RAISE(ABORT, 'treatment plans are immutable');
+END;
+
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
 ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
@@ -463,6 +478,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_examination_interpretation
 ON jobs(session_id, job_type) WHERE job_type = 'EXAMINATION_INTERPRETATION';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_note_generation
 ON jobs(session_id, job_type) WHERE job_type = 'NOTE_GENERATION';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_treatment_plan
+ON jobs(session_id, job_type) WHERE job_type = 'TREATMENT_PLAN';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
@@ -521,6 +538,7 @@ class Database:
             self._migrate_v5(connection)
             self._migrate_v6(connection)
             self._migrate_v7(connection)
+            self._migrate_v8(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -782,6 +800,53 @@ class Database:
             connection.execute(
                 "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
                 "VALUES (?, 'job', ?, 'NOTE_GENERATION_QUEUED', 'migration-v7', '{}', ?)",
+                (row["session_id"], job_id, now),
+            )
+
+    @staticmethod
+    def _migrate_v8(connection: sqlite3.Connection) -> None:
+        """Add structured, immutable treatment plans and recoverable worker jobs."""
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(treatment_plans)")}
+        for name, definition in {
+            "structured_json": "TEXT NOT NULL DEFAULT '{}'",
+            "fact_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+            "status": "TEXT NOT NULL DEFAULT 'DRAFT'",
+        }.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE treatment_plans ADD COLUMN {name} {definition}")
+        connection.executescript(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_treatment_plan
+            ON jobs(session_id, job_type) WHERE job_type = 'TREATMENT_PLAN';
+            CREATE TRIGGER IF NOT EXISTS prevent_treatment_plan_update
+            BEFORE UPDATE ON treatment_plans
+            BEGIN
+                SELECT RAISE(ABORT, 'treatment plans are immutable; create a new version');
+            END;
+            CREATE TRIGGER IF NOT EXISTS prevent_treatment_plan_delete
+            BEFORE DELETE ON treatment_plans
+            BEGIN
+                SELECT RAISE(ABORT, 'treatment plans are immutable');
+            END;
+            """
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        rows = connection.execute(
+            "SELECT n.session_id FROM notes n WHERE n.version = ("
+            "SELECT MAX(n2.version) FROM notes n2 WHERE n2.session_id = n.session_id) "
+            "AND NOT EXISTS (SELECT 1 FROM treatment_plans t WHERE t.session_id = n.session_id) "
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.session_id = n.session_id AND j.job_type = 'TREATMENT_PLAN')"
+        ).fetchall()
+        for row in rows:
+            job_id = str(uuid4())
+            connection.execute(
+                "INSERT INTO jobs(id, session_id, job_type, status, payload_json, attempts, max_attempts, "
+                "available_at, created_at, updated_at) VALUES (?, ?, 'TREATMENT_PLAN', 'PENDING', '{}', 0, 3, ?, ?, ?)",
+                (job_id, row["session_id"], now, now, now),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
+                "VALUES (?, 'job', ?, 'TREATMENT_PLAN_QUEUED', 'migration-v8', '{}', ?)",
                 (row["session_id"], job_id, now),
             )
 

@@ -11,6 +11,7 @@ from worker.diarization import DiarizationWorker
 from worker.examination import ExaminationInterpretationWorker
 from worker.structuring import StructuringWorker
 from worker.notes import NoteGenerationWorker
+from worker.treatment import TreatmentPlanWorker
 
 
 def run() -> None:
@@ -30,6 +31,7 @@ def run() -> None:
     examination_worker = ExaminationInterpretationWorker(database, settings)
     structuring_worker = StructuringWorker(database, settings)
     note_worker = NoteGenerationWorker(database, settings)
+    treatment_worker = TreatmentPlanWorker(database, settings)
     try:
         while True:
             processed = transcription_worker.process_once()
@@ -37,6 +39,7 @@ def run() -> None:
             processed = examination_worker.process_once() or processed
             processed = structuring_worker.process_once() or processed
             processed = note_worker.process_once() or processed
+            processed = treatment_worker.process_once() or processed
             if not processed:
                 time.sleep(poll_seconds)
     except KeyboardInterrupt:
