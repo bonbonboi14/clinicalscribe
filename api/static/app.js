@@ -480,3 +480,47 @@ document.querySelector("#loadTreatmentReview").addEventListener("click", async (
     treatmentReviewStatus.textContent = `Could not load: ${error.message}`;
   }
 });
+
+const diagnosisSessionInput = document.querySelector("#diagnosisSessionId");
+const diagnosisToggle = document.querySelector("#diagnosisEnabled");
+const diagnosisStatus = document.querySelector("#diagnosisReviewStatus");
+const diagnosisDisclaimer = document.querySelector("#diagnosisDisclaimer");
+const diagnosisResult = document.querySelector("#diagnosisResult");
+diagnosisSessionInput.value ||= activeSessionId || localStorage.getItem("clinicalScribeLastSessionId") || "";
+
+async function loadDiagnosisReview() {
+  const sessionId = diagnosisSessionInput.value.trim();
+  if (!sessionId) return;
+  diagnosisStatus.textContent = "Loading differential settings…";
+  const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/diagnosis-review`);
+  if (!response.ok) throw new Error((await response.json()).detail || `Load failed (${response.status})`);
+  const review = await response.json();
+  diagnosisToggle.disabled = !review.system_enabled;
+  diagnosisToggle.checked = review.effective_enabled;
+  diagnosisDisclaimer.hidden = !review.disclaimer;
+  diagnosisDisclaimer.textContent = review.disclaimer || "";
+  diagnosisResult.textContent = review.rendered;
+  diagnosisStatus.textContent = review.effective_enabled
+    ? "Differential enabled for this session. Clinician judgment is required."
+    : review.disabled_message;
+}
+
+document.querySelector("#loadDiagnosisReview").addEventListener("click", () => {
+  loadDiagnosisReview().catch(error => { diagnosisStatus.textContent = `Could not load: ${error.message}`; });
+});
+
+diagnosisToggle.addEventListener("change", async () => {
+  const sessionId = diagnosisSessionInput.value.trim();
+  if (!sessionId) return;
+  try {
+    const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/diagnosis-settings`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: diagnosisToggle.checked })
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || `Update failed (${response.status})`);
+    await loadDiagnosisReview();
+  } catch (error) {
+    diagnosisStatus.textContent = `Could not update: ${error.message}`;
+    diagnosisToggle.checked = !diagnosisToggle.checked;
+  }
+});

@@ -78,8 +78,16 @@ class ClaimExtractor:
 
     def from_differential(self, differential: Differential) -> list[ExtractedClaim]:
         claims: list[ExtractedClaim] = []
-        evidence = tuple(differential.fact_ids)
         for index, candidate in enumerate(differential.candidates):
+            if hasattr(candidate, "supporting_features") and hasattr(candidate, "evidence_refs"):
+                evidence = tuple(candidate.evidence_refs)
+                for key in ("supporting_features", "features_against"):
+                    for feature_index, value in enumerate(getattr(candidate, key)):
+                        claims.append(ExtractedClaim(
+                            value, f"candidates.{index}.{key}.{feature_index}", evidence
+                        ))
+                continue
+            evidence = tuple(differential.fact_ids)
             for key in ("diagnosis", "name", "candidate"):
                 value = candidate.get(key)
                 if isinstance(value, str) and value.strip():

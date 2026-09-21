@@ -97,6 +97,18 @@
       </div>
       <div id="treatmentClaimSummary"></div>
     </section>
+    <section class="card" id="diagnosisReviewCard">
+      <h2>Differential Diagnosis</h2>
+      <p>Optional decision support generated only from documented facts. It never changes the clinical note or treatment plan.</p>
+      <div class="review-load">
+        <label>Session ID <input id="diagnosisSessionId" autocomplete="off"></label>
+        <button id="loadDiagnosisReview">Load differential</button>
+      </div>
+      <label class="toggle-row"><input id="diagnosisEnabled" type="checkbox"> Enable differential diagnosis for this session</label>
+      <p id="diagnosisReviewStatus" role="status">Differential diagnosis: [Disabled — enable in settings]</p>
+      <p id="diagnosisDisclaimer" class="warning" hidden></p>
+      <pre id="diagnosisResult" class="review-pane">Differential diagnosis: [Disabled — enable in settings]</pre>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

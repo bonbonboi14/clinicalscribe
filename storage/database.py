@@ -8,7 +8,7 @@ from typing import Iterator
 from uuid import uuid4
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     assembled_checksum_sha256 TEXT,
     assembled_size_bytes INTEGER CHECK (assembled_size_bytes IS NULL OR assembled_size_bytes >= 0),
     assembled_at TEXT,
-    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+    diagnosis_enabled INTEGER CHECK (diagnosis_enabled IS NULL OR diagnosis_enabled IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS audio_chunks (
@@ -258,6 +259,7 @@ CREATE TABLE IF NOT EXISTS differentials (
     candidates_json TEXT NOT NULL DEFAULT '[]',
     fact_ids_json TEXT NOT NULL DEFAULT '[]',
     disclaimer TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     UNIQUE(session_id, version)
 );
@@ -467,6 +469,18 @@ BEGIN
     SELECT RAISE(ABORT, 'treatment plans are immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS prevent_differential_update
+BEFORE UPDATE ON differentials
+BEGIN
+    SELECT RAISE(ABORT, 'differentials are immutable; create a new version');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_differential_delete
+BEFORE DELETE ON differentials
+BEGIN
+    SELECT RAISE(ABORT, 'differentials are immutable');
+END;
+
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, available_at, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_transcription
 ON jobs(session_id, job_type) WHERE job_type = 'TRANSCRIPTION';
@@ -480,6 +494,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_note_generation
 ON jobs(session_id, job_type) WHERE job_type = 'NOTE_GENERATION';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_treatment_plan
 ON jobs(session_id, job_type) WHERE job_type = 'TREATMENT_PLAN';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_differential
+ON jobs(session_id, job_type) WHERE job_type = 'DIFFERENTIAL';
 CREATE INDEX IF NOT EXISTS idx_audio_chunks_session ON audio_chunks(session_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, version);
 CREATE INDEX IF NOT EXISTS idx_diarization_session ON diarization_runs(session_id, created_at);
@@ -539,6 +555,7 @@ class Database:
             self._migrate_v6(connection)
             self._migrate_v7(connection)
             self._migrate_v8(connection)
+            self._migrate_v9(connection)
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -849,6 +866,35 @@ class Database:
                 "VALUES (?, 'job', ?, 'TREATMENT_PLAN_QUEUED', 'migration-v8', '{}', ?)",
                 (row["session_id"], job_id, now),
             )
+
+    @staticmethod
+    def _migrate_v9(connection: sqlite3.Connection) -> None:
+        """Add the optional, session-aware differential diagnosis worker state."""
+        session_columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
+        if "diagnosis_enabled" not in session_columns:
+            connection.execute(
+                "ALTER TABLE sessions ADD COLUMN diagnosis_enabled INTEGER "
+                "CHECK (diagnosis_enabled IS NULL OR diagnosis_enabled IN (0, 1))"
+            )
+        differential_columns = {row["name"] for row in connection.execute("PRAGMA table_info(differentials)")}
+        if "result_json" not in differential_columns:
+            connection.execute("ALTER TABLE differentials ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}'")
+        connection.executescript(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_differential
+            ON jobs(session_id, job_type) WHERE job_type = 'DIFFERENTIAL';
+            CREATE TRIGGER IF NOT EXISTS prevent_differential_update
+            BEFORE UPDATE ON differentials
+            BEGIN
+                SELECT RAISE(ABORT, 'differentials are immutable; create a new version');
+            END;
+            CREATE TRIGGER IF NOT EXISTS prevent_differential_delete
+            BEFORE DELETE ON differentials
+            BEGIN
+                SELECT RAISE(ABORT, 'differentials are immutable');
+            END;
+            """
+        )
 
 
 def initialize_database(path: str | Path, **kwargs: object) -> Database:

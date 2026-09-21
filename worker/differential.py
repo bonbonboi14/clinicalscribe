@@ -7,38 +7,43 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from config.settings import AppConfig
+from config.loader import DiagnosisConfig
+from core.diagnosis import DifferentialDiagnosisEngine
 from core.models import AssertionState, ClinicalFact, JobStatus, SessionStatus
-from core.treatment import TreatmentPlanGenerator
 from core.validation import HallucinationFirewall, NoteValidator
 from storage.database import Database
-from storage.jobs import (
-    ClaimedJob, TreatmentPlanStage, claim_treatment_plan_job, enqueue_differential_job,
-)
+from storage.jobs import ClaimedJob, DifferentialStage, claim_differential_job
 
 
 logger = logging.getLogger(__name__)
 
 
-class TreatmentPlanWorker:
+class DifferentialWorker:
     def __init__(
         self,
         database: Database,
         settings: AppConfig,
         *,
-        generator: TreatmentPlanGenerator | None = None,
+        engine: DifferentialDiagnosisEngine | None = None,
         worker_id: str | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
-        self.generator = generator or TreatmentPlanGenerator()
+        self.engine = engine or DifferentialDiagnosisEngine(
+            DiagnosisConfig(enabled=settings.diagnosis.enabled)
+        )
         self.validator = NoteValidator()
         self.firewall = HallucinationFirewall(self.validator)
         self.worker_id = worker_id or f"{socket.gethostname()}:{uuid4()}"
         self.lease_seconds = int(settings.worker.get("lease_seconds", 300))
 
     def process_once(self) -> bool:
+        # The worker does not claim or execute differential jobs while the
+        # system-level safety toggle is off.
+        if not self.settings.diagnosis.enabled:
+            return False
         with self.database.transaction() as connection:
-            job = claim_treatment_plan_job(
+            job = claim_differential_job(
                 connection, lease_owner=self.worker_id, lease_seconds=self.lease_seconds
             )
         if job is None:
@@ -46,7 +51,7 @@ class TreatmentPlanWorker:
         try:
             self._process(job)
         except Exception as exc:
-            logger.exception("treatment_plan_job_failed", extra={"job_id": str(job.id)})
+            logger.exception("differential_job_failed", extra={"job_id": str(job.id)})
             self._record_failure(job, exc)
         return True
 
@@ -56,14 +61,19 @@ class TreatmentPlanWorker:
                 "SELECT * FROM structured_facts WHERE session_id = ? ORDER BY created_at, id",
                 (str(job.session_id),),
             ).fetchall()
-            note = connection.execute(
-                "SELECT id FROM notes WHERE session_id = ? ORDER BY version DESC LIMIT 1",
-                (str(job.session_id),),
+            session = connection.execute(
+                "SELECT diagnosis_enabled FROM sessions WHERE id = ?", (str(job.session_id),)
             ).fetchone()
             next_version = connection.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM treatment_plans WHERE session_id = ?",
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM differentials WHERE session_id = ?",
                 (str(job.session_id),),
             ).fetchone()[0]
+        if session is None:
+            raise ValueError("differential session does not exist")
+        session_enabled = None if session["diagnosis_enabled"] is None else bool(session["diagnosis_enabled"])
+        if session_enabled is False:
+            self._cancel_disabled(job)
+            return
         facts = [ClinicalFact(
             id=UUID(row["id"]), session_id=UUID(row["session_id"]), category=row["category"],
             name=row["name"], value=row["value"], assertion=AssertionState(row["assertion"]),
@@ -71,22 +81,18 @@ class TreatmentPlanWorker:
             transcript_segment_ids=[UUID(item) for item in json.loads(row["evidence_json"])],
             original_text=row["original_text"],
         ) for row in rows]
-        plan = self.generator.generate(
-            job.session_id,
-            facts,
-            note_id=UUID(note["id"]) if note else None,
-            version=next_version,
-        )
-        validation = self.firewall.require_safe(self.validator.validate_treatment_plan(plan, facts))
+        result = self.engine.generate(job.session_id, facts, session_enabled=session_enabled)
+        validation = self.firewall.validate_differential(result, facts)
         now = datetime.now(timezone.utc).isoformat()
         with self.database.transaction() as connection:
             self._require_lease(connection, job)
             connection.execute(
-                "INSERT INTO treatment_plans(id, session_id, note_id, version, items_json, evidence_json, "
-                "structured_json, fact_ids_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(plan.id), str(plan.session_id), str(plan.note_id) if plan.note_id else None, plan.version,
-                 "[]", json.dumps([str(item) for item in plan.transcript_segment_ids]),
-                 plan.model_dump_json(), json.dumps([str(item) for item in plan.fact_ids]), plan.status, now),
+                "INSERT INTO differentials(id, session_id, version, enabled_at_generation, candidates_json, "
+                "fact_ids_json, disclaimer, result_json, created_at) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)",
+                (str(result.id), str(result.session_id), next_version,
+                 json.dumps([candidate.model_dump(mode="json") for candidate in result.candidates]),
+                 json.dumps([str(item) for item in result.fact_ids]), result.disclaimer,
+                 result.model_dump_json(), now),
             )
             for finding in validation.findings:
                 connection.execute(
@@ -99,7 +105,7 @@ class TreatmentPlanWorker:
             connection.execute(
                 "UPDATE jobs SET status = ?, stage = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? "
                 "WHERE id = ? AND lease_owner = ?",
-                (JobStatus.SUCCEEDED.value, TreatmentPlanStage.GENERATED.value, now, str(job.id), job.lease_owner),
+                (JobStatus.SUCCEEDED.value, DifferentialStage.GENERATED.value, now, str(job.id), job.lease_owner),
             )
             connection.execute(
                 "UPDATE sessions SET status = ?, updated_at = ?, version = version + 1 WHERE id = ?",
@@ -107,37 +113,17 @@ class TreatmentPlanWorker:
             )
             connection.execute(
                 "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
-                "VALUES (?, 'treatment_plan', ?, ?, ?, ?, ?)",
-                (str(job.session_id), str(plan.id), TreatmentPlanStage.GENERATED.value, self.worker_id,
-                 json.dumps({"version": plan.version, "fact_count": len(plan.fact_ids),
-                             "claim_states": sorted({item.state.value for item in validation.findings})}), now),
+                "VALUES (?, 'differential', ?, ?, ?, ?, ?)",
+                (str(job.session_id), str(result.id), DifferentialStage.GENERATED.value, self.worker_id,
+                 json.dumps({"version": next_version, "candidate_count": len(result.candidates),
+                             "fact_count_used": result.fact_count_used}), now),
             )
-            session = connection.execute(
-                "SELECT diagnosis_enabled FROM sessions WHERE id = ?", (str(job.session_id),)
-            ).fetchone()
-            session_enabled = session is not None and (
-                session["diagnosis_enabled"] is None or bool(session["diagnosis_enabled"])
-            )
-            if self.settings.diagnosis.enabled and session_enabled and enqueue_differential_job(
-                connection, job.session_id,
-                max_attempts=int(self.settings.worker.get("max_attempts", 3)), now=now,
-            ):
-                queued = connection.execute(
-                    "SELECT id FROM jobs WHERE session_id = ? AND job_type = 'DIFFERENTIAL'",
-                    (str(job.session_id),),
-                ).fetchone()
-                connection.execute(
-                    "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
-                    "VALUES (?, 'job', ?, 'DIFFERENTIAL_QUEUED', ?, ?, ?)",
-                    (str(job.session_id), queued["id"], self.worker_id,
-                     json.dumps({"treatment_plan_id": str(plan.id)}), now),
-                )
 
     @staticmethod
     def _require_lease(connection, job: ClaimedJob) -> None:
         row = connection.execute("SELECT status, lease_owner FROM jobs WHERE id = ?", (str(job.id),)).fetchone()
         if row is None or row["lease_owner"] != job.lease_owner or row["status"] not in {"LEASED", "RUNNING"}:
-            raise RuntimeError("treatment plan job lease was lost before persistence")
+            raise RuntimeError("differential job lease was lost before persistence")
 
     def _record_failure(self, job: ClaimedJob, exc: Exception) -> None:
         now = datetime.now(timezone.utc)
@@ -155,3 +141,18 @@ class TreatmentPlanWorker:
                     "UPDATE sessions SET status = ?, updated_at = ?, version = version + 1 WHERE id = ?",
                     (SessionStatus.FAILED.value, now.isoformat(), str(job.session_id)),
                 )
+
+    def _cancel_disabled(self, job: ClaimedJob) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.transaction() as connection:
+            self._require_lease(connection, job)
+            connection.execute(
+                "UPDATE jobs SET status = 'CANCELLED', lease_owner = NULL, lease_expires_at = NULL, "
+                "error = NULL, updated_at = ? WHERE id = ? AND lease_owner = ?",
+                (now, str(job.id), job.lease_owner),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(session_id, artefact_type, artefact_id, action, actor, after_json, created_at) "
+                "VALUES (?, 'job', ?, 'DIFFERENTIAL_CANCELLED_DISABLED', ?, '{}', ?)",
+                (str(job.session_id), str(job.id), self.worker_id, now),
+            )

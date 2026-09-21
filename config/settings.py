@@ -51,6 +51,10 @@ class GitHubSection(StrictModel):
         return self
 
 
+class DiagnosisSection(StrictModel):
+    enabled: bool = False
+
+
 class AppConfig(StrictModel):
     app: AppSection
     server: ServerSection
@@ -68,6 +72,7 @@ class AppConfig(StrictModel):
     clerking: dict[str, Any]
     note_generation: dict[str, Any]
     treatment: dict[str, Any]
+    diagnosis: DiagnosisSection
     differential: dict[str, Any]
     review: dict[str, Any]
     export: dict[str, Any]
@@ -83,4 +88,3 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"Configuration root must be a mapping: {config_path}")
     return AppConfig.model_validate(raw)
-

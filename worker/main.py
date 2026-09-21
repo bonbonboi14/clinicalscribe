@@ -12,6 +12,7 @@ from worker.examination import ExaminationInterpretationWorker
 from worker.structuring import StructuringWorker
 from worker.notes import NoteGenerationWorker
 from worker.treatment import TreatmentPlanWorker
+from worker.differential import DifferentialWorker
 
 
 def run() -> None:
@@ -32,6 +33,7 @@ def run() -> None:
     structuring_worker = StructuringWorker(database, settings)
     note_worker = NoteGenerationWorker(database, settings)
     treatment_worker = TreatmentPlanWorker(database, settings)
+    differential_worker = DifferentialWorker(database, settings)
     try:
         while True:
             processed = transcription_worker.process_once()
@@ -40,6 +42,7 @@ def run() -> None:
             processed = structuring_worker.process_once() or processed
             processed = note_worker.process_once() or processed
             processed = treatment_worker.process_once() or processed
+            processed = differential_worker.process_once() or processed
             if not processed:
                 time.sleep(poll_seconds)
     except KeyboardInterrupt:
