@@ -17,6 +17,7 @@ from api.notes import router as notes_router
 from api.treatment import router as treatment_router
 from api.diagnosis import router as diagnosis_router
 from api.github import router as github_router
+from api.phone import router as phone_router
 from config import load_config
 from core.logging import configure_logging
 from storage import initialize_database
@@ -52,6 +53,7 @@ app.include_router(notes_router)
 app.include_router(treatment_router)
 app.include_router(diagnosis_router)
 app.include_router(github_router)
+app.include_router(phone_router)
 
 _STATIC_DIRECTORY = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")
@@ -65,3 +67,8 @@ def health() -> dict[str, str]:
 @app.get("/", include_in_schema=False)
 def desktop_ui() -> FileResponse:
     return FileResponse(_STATIC_DIRECTORY / "index.html")
+
+
+@app.get("/phone", include_in_schema=False)
+def phone_ui() -> FileResponse:
+    return FileResponse(_STATIC_DIRECTORY / "phone.html")

@@ -152,7 +152,13 @@ def _try_assemble(request: Request, session_id: UUID) -> None:
 def create_session(
     request: Request,
     payload: SessionCreate = Body(default_factory=SessionCreate),
+    x_pairing_code: Annotated[str | None, Header(alias="X-Pairing-Code")] = None,
 ) -> SessionResponse:
+    # Validate pairing code if present (for phone access)
+    if x_pairing_code:
+        from api.phone import _validate_pairing_code
+        if not _validate_pairing_code(x_pairing_code.upper()):
+            raise HTTPException(status_code=403, detail="invalid or expired pairing code")
     database = _database(request)
     session_id = uuid4()
     patient_id = uuid4() if payload.patient is not None else None
@@ -208,7 +214,13 @@ async def upload_chunk(
     x_chunk_sha256: Annotated[str, Header(alias="X-Chunk-SHA256")],
     is_final: Annotated[bool, Query()] = False,
     x_file_name: Annotated[str | None, Header(alias="X-File-Name")] = None,
+    x_pairing_code: Annotated[str | None, Header(alias="X-Pairing-Code")] = None,
 ) -> ChunkUploadResponse:
+    # Validate pairing code if present (for phone access)
+    if x_pairing_code:
+        from api.phone import _validate_pairing_code
+        if not _validate_pairing_code(x_pairing_code.upper()):
+            raise HTTPException(status_code=403, detail="invalid or expired pairing code")
     if not _SHA256_PATTERN.fullmatch(x_chunk_sha256):
         raise HTTPException(status_code=400, detail="X-Chunk-SHA256 must be 64 hexadecimal characters")
     checksum = x_chunk_sha256.lower()

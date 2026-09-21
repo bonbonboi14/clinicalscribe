@@ -3,6 +3,12 @@ const detailEl = document.querySelector("#detail");
 const progressEl = document.querySelector("#progress");
 const startButton = document.querySelector("#start");
 const stopButton = document.querySelector("#stop");
+const enablePhoneButton = document.querySelector("#enablePhone");
+const disablePhoneButton = document.querySelector("#disablePhone");
+const phoneAccessDiv = document.querySelector("#phoneAccess");
+const phoneUrlEl = document.querySelector("#phoneUrl");
+const pairingCodeEl = document.querySelector("#pairingCode");
+const qrCodeEl = document.querySelector("#qrCode");
 
 let recorder;
 let activeSessionId = localStorage.getItem("clinicalScribeSessionId");
@@ -10,6 +16,76 @@ let nextSequence = 0;
 let recordingStopped = false;
 let uploadRunning = false;
 let uploadRequested = false;
+
+// Phone access management
+enablePhoneButton.addEventListener("click", async () => {
+  try {
+    const response = await fetch("/api/v1/phone/enable", { method: "POST" });
+    if (!response.ok) throw new Error(`Failed to enable phone access (${response.status})`);
+    const config = await response.json();
+
+    phoneUrlEl.textContent = config.lan_url;
+    pairingCodeEl.textContent = config.pairing_code;
+
+    // Generate QR code
+    qrCodeEl.innerHTML = "";
+    const qr = new QRCode(qrCodeEl, {
+      text: config.lan_url,
+      width: 200,
+      height: 200,
+      colorDark: "#0F172A",
+      colorLight: "#F8FAFC"
+    });
+
+    phoneAccessDiv.style.display = "block";
+    enablePhoneButton.disabled = true;
+    disablePhoneButton.disabled = false;
+    setStatus("Phone access enabled. Scan QR code or enter pairing code on phone.");
+  } catch (error) {
+    setStatus(`Failed to enable phone access: ${error.message}`);
+  }
+});
+
+disablePhoneButton.addEventListener("click", async () => {
+  try {
+    await fetch("/api/v1/phone/disable", { method: "POST" });
+    phoneAccessDiv.style.display = "none";
+    enablePhoneButton.disabled = false;
+    disablePhoneButton.disabled = true;
+    setStatus("Phone access disabled.");
+  } catch (error) {
+    setStatus(`Failed to disable phone access: ${error.message}`);
+  }
+});
+
+// Check phone access status on load
+(async () => {
+  try {
+    const response = await fetch("/api/v1/phone/status");
+    if (response.ok) {
+      const config = await response.json();
+      if (config.enabled && config.lan_url) {
+        phoneUrlEl.textContent = config.lan_url;
+        pairingCodeEl.textContent = config.pairing_code;
+
+        qrCodeEl.innerHTML = "";
+        new QRCode(qrCodeEl, {
+          text: config.lan_url,
+          width: 200,
+          height: 200,
+          colorDark: "#0F172A",
+          colorLight: "#F8FAFC"
+        });
+
+        phoneAccessDiv.style.display = "block";
+        enablePhoneButton.disabled = true;
+        disablePhoneButton.disabled = false;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to check phone status:", error);
+  }
+})();
 
 const databaseReady = new Promise((resolve, reject) => {
   const request = indexedDB.open("clinical-scribe-recordings", 1);

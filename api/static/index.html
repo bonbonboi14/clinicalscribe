@@ -5,11 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Clinical Scribe — Recording</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <main>
     <h1>Clinical Scribe</h1>
     <p class="subtitle">Local-first recording and resumable upload</p>
+    <section class="card">
+      <h2>Phone Recording</h2>
+      <button id="enablePhone">Enable phone access</button>
+      <button id="disablePhone" disabled>Disable phone access</button>
+      <div id="phoneAccess" style="display: none; margin-top: 1rem; padding: 1rem; background: #1E293B; border-radius: 4px;">
+        <p style="font-weight: 600; color: #38BDF8; margin-bottom: 0.5rem;">Phone Connection Ready</p>
+        <p style="font-size: 0.875rem; margin-bottom: 0.5rem;">1. Scan this QR code with your phone:</p>
+        <div id="qrCode" style="margin: 1rem 0;"></div>
+        <p style="font-size: 0.875rem; margin-bottom: 0.25rem;">2. Or open this URL on your phone:</p>
+        <p id="phoneUrl" style="font-family: monospace; font-size: 0.875rem; background: #0F172A; padding: 0.5rem; border-radius: 4px; word-break: break-all; margin-bottom: 0.5rem;"></p>
+        <p style="font-size: 0.875rem; margin-bottom: 0.25rem;">3. Enter this pairing code on your phone:</p>
+        <p id="pairingCode" style="font-family: monospace; font-size: 1.5rem; font-weight: 700; color: #F97316; text-align: center; padding: 0.5rem; background: #0F172A; border-radius: 4px; letter-spacing: 0.1em;"></p>
+        <p style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem;">Code expires in 15 minutes. Ensure phone and desktop are on the same Wi-Fi network.</p>
+      </div>
+    </section>
     <section class="card">
       <h2>Optional patient details</h2>
       <div class="fields">
